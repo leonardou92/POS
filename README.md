@@ -24,36 +24,3 @@ Este es un sistema de punto de venta (POS) moderno desarrollado con React, TypeS
 *   **Lucide React:** Biblioteca de íconos.
 *   **React Hot Toast:** Libreria para la generación de notificaciones
 *   **React Router DOM:** Manejo de la navegación entre las diferentes rutas.
-
-## Prerrequisitos
-
-Antes de comenzar, asegúrate de tener instalado lo siguiente:
-
-*   **Node.js:** (Versión 14 o superior). Puedes descargarlo desde [https://nodejs.org/](https://nodejs.org/).
-*   **npm o Yarn:**  Gestor de paquetes.  npm se instala con Node.js.
-
-## Instalación
-
-1.  **Clona el repositorio:**
-
-    ```bash
-    git clone [URL del repositorio]
-    cd pos-system
-    ```
-
-2.  **Instala las dependencias:**
-
-    ```bash
-    npm install  # o yarn install
-    ```
-
-## Configuración
-
-*   **Variables de entorno (opcional):**  Si necesitas configurar variables de entorno (por ejemplo, la URL de la API), crea un archivo `.env` en la raíz del proyecto.
-
-## Ejecución
-
-Para ejecutar el proyecto en modo de desarrollo:
-
-```bash
-npm run dev   # o yarn dev
