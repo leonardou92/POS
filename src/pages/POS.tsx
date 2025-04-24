@@ -1,5 +1,3 @@
-// pages/POS.tsx
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
@@ -22,6 +20,60 @@ import { invoiceService } from '../services/api';
 import { InvoiceRequest, Document, Detail, Product, GetProductsResponse, Client, PagoRequest } from '../types/api';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+
+interface CorrelativoResponse {
+    status: boolean;
+    id: string;
+    tipo_documento: string;
+    serie: string;
+    ultimo_numero: number;
+}
+
+interface ConfirmationModalProps {
+    message: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+}
+
+const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ message, onConfirm, onCancel }) => {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
+                <div className="flex items-start">
+                    <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-warning-100 sm:mx-0 sm:h-10 sm:w-10">
+                        <AlertTriangle className="h-6 w-6 text-warning-600" aria-hidden="true" />
+                    </div>
+                    <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Confirmación
+                        </h3>
+                        <div className="mt-2">
+                            <p className="text-sm text-gray-500">
+                                {message}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div className="flex justify-end space-x-3 mt-6">
+                    <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={onCancel}
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={onConfirm}
+                    >
+                        Confirmar
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const POS: React.FC = () => {
     const navigate = useNavigate();
@@ -46,6 +98,10 @@ const POS: React.FC = () => {
     const [rifSearchLoading, setRifSearchLoading] = useState(false); // Loading state for RIF search
     const [rifSearchTerm, setRifSearchTerm] = useState(''); //Local RIF search
     const [showCreditOption, setShowCreditOption] = useState(false); // Display credit option
+
+    //const [correlativo, setCorrelativo] = useState<CorrelativoResponse | null>(null); REMOVED: Now we fetch correlativo inside the completeSale handler
+    const [correlativoLoading, setCorrelativoLoading] = useState(false);
+    const [noCorrelativoAlert, setNoCorrelativoAlert] = useState(false); // State for no correlativo alert
 
     useEffect(() => {
         const fetchProducts = async () => {
@@ -85,6 +141,36 @@ const POS: React.FC = () => {
 
         fetchProducts();
     }, [user?.sucursal]);
+
+    /*
+    useEffect(() => {
+        const fetchCorrelativo = async () => {
+            try {
+                setCorrelativoLoading(true);
+                const response = await invoiceService.buscarCorrelativosPorTipo('FA'); // Assuming 'FA' is the document type for invoices
+
+                if (response && response.status) {
+                    setCorrelativo(response);
+                    setNoCorrelativoAlert(false); // Clear the alert if correlativo is found
+                } else {
+                    console.error('Error fetching correlativo:', response);
+                    toast.error(response?.message || 'Error al obtener el correlativo');
+                    setCorrelativo(null);
+                    setNoCorrelativoAlert(true); // Set the alert to true
+                }
+            } catch (error: any) {
+                console.error('Error fetching correlativo:', error);
+                toast.error(error.message || 'Error al obtener el correlativo');
+                setCorrelativo(null);
+                setNoCorrelativoAlert(true); // Set the alert to true
+            } finally {
+                setCorrelativoLoading(false);
+            }
+        };
+
+        fetchCorrelativo();
+    }, []);
+    */
 
     const fetchCustomers = useCallback(async () => {
         try {
@@ -246,6 +332,34 @@ const POS: React.FC = () => {
             return;
         }
 
+        // ************************* FETCH THE CORRELATIVO HERE ******************************
+        let correlativo: CorrelativoResponse | null = null;
+        try {
+            setCorrelativoLoading(true);
+            const response = await invoiceService.buscarCorrelativosPorTipo('FA'); // Assuming 'FA' is the document type for invoices
+
+            if (response && response.status) {
+                correlativo = response;
+                setNoCorrelativoAlert(false); // Clear the alert if correlativo is found
+            } else {
+                console.error('Error fetching correlativo:', response);
+                toast.error(response?.message || 'Error al obtener el correlativo');
+                correlativo = null;
+                setNoCorrelativoAlert(true); // Set the alert to true
+            }
+        } catch (error: any) {
+            console.error('Error fetching correlativo:', error);
+            toast.error(error.message || 'Error al obtener el correlativo');
+            correlativo = null;
+            setNoCorrelativoAlert(true); // Set the alert to true
+        } finally {
+            setCorrelativoLoading(false);
+        }
+
+        if (!correlativo) {
+            return;
+        }
+
         try {
             setLoading(true);
 
@@ -253,7 +367,10 @@ const POS: React.FC = () => {
             const formattedDate = now.toISOString().split('T')[0] + ' ' +
                 now.toTimeString().split(' ')[0];
 
-            let invoiceNumber = '1';
+            // Use the correlativo number before incrementing it
+            const invoiceNumber = correlativo.ultimo_numero;
+            const controlNumber = invoiceNumber; //SAME VALUE
+            const updatedNumber = invoiceNumber + 1;
 
             // Calculate totals in VES based on currency and exchange rate
             const totalGeneralVES = paymentData?.paymentCurrency === 'USD' ? (totals.grandTotal * paymentData?.exchangeRate) : totals.grandTotal;
@@ -261,13 +378,12 @@ const POS: React.FC = () => {
             const baseImponibleVES = paymentData?.paymentCurrency === 'USD' ? (totals.taxableAmount * paymentData?.exchangeRate) : totals.taxableAmount;
             const subtotalVES = paymentData?.paymentCurrency === 'USD' ? (totals.subtotal * paymentData?.exchangeRate) : totals.subtotal;
             const montoIvaVES = paymentData?.paymentCurrency === 'USD' ? (totals.tax * paymentData?.exchangeRate) : totals.tax;
-            const totalVES = paymentData?.paymentCurrency === 'USD' ? (totals.total * paymentData?.exchangeRate) : totals.total;
             const igtfVES = paymentData?.paymentCurrency === 'USD' ? (totals.igtf * paymentData?.exchangeRate) : totals.igtf;
 
             const documento: Document = {
                 tipo_documento: 'FA',
-                numero_documento: invoiceNumber,
-                numero_control: invoiceNumber,
+                numero_documento: invoiceNumber.toString(), // Convert invoice number to string
+                numero_control: controlNumber.toString(), // Convert control number to string
                 fecha_emision: formattedDate,
                 razon_social: customer.razonSocial,
                 registro_fiscal: customer.registroFiscal,
@@ -285,8 +401,8 @@ const POS: React.FC = () => {
                 base_reducido: 0,
                 monto_iva_reducido: 0,
                 porcentaje_iva_reducido: 0, // Added missing property
-                total: totalVES,
-                base_igtf: totalVES,
+                total: totals.grandTotal,
+                base_igtf: totals.grandTotal,
                 monto_igtf: igtfVES,
                 porcentaje_igtf: 3,
                 total_general: totalGeneralVES,
@@ -294,7 +410,7 @@ const POS: React.FC = () => {
                 tasa_cambio: paymentData?.exchangeRate || 1,
                 direccion_envio: customer.direccionEnvio || 'test',
                 serie_strong_id: 'POS-' + Date.now().toString(),
-                serie: 'A',
+                serie: correlativo?.serie || '', // Ensure serie is not undefined
                 usuario: user?.username || 'usuario',
                 status: 'PROCESADO', // Even for credit, set it to PROCESSED initially
                 motivo_anulacion: '',
@@ -330,74 +446,74 @@ const POS: React.FC = () => {
             try {
                 const response = await invoiceService.createInvoice(invoiceRequest);
 
-                if (!onCredit && paymentData && paymentData.isPaid) {
-                    // Determine correct payment description based on currency
-                    const paymentDescription = paymentData.currency === 'VES' ? 'Transferencia Bs' : 'Transferencia USD';
+                console.log("Create Invoice Response:", response);
 
-                    // Validate paymentData.amount and provide a default value if needed
-                    const paymentAmount = paymentData.amount && !isNaN(parseFloat(paymentData.amount)) ? parseFloat(paymentData.amount).toFixed(2) : '0.00';
+                if (response && response.status) {
+                    // Now, after the invoice is successfully created, update the correlative:
+                    if (correlativo) {
+                        try {
+                            await invoiceService.updateCorrelativo(correlativo.tipo_documento, { ultimo_numero: updatedNumber });
+                            toast.success(`Correlativo actualizado correctamente a: ${updatedNumber}`);
 
-                    // Determine reference based on payment method
-                    let paymentReference = paymentData.reference;
-                    let banco = paymentData.banco;
-                    if (paymentData.metodoPago === 'efectivo') {
-                        paymentReference = `Pago efectivo ${paymentData.currency} A factura: ${invoiceNumber} fecha: ${formattedDate}`;
-                        banco = `Efectivo ${paymentData.currency}`;
+                        } catch (updateError: any) {
+                            console.error('Error updating correlativo after creating the invoice', updateError);
+                            toast.error("Factura creada, pero hubo un error actualizando el número correlativo. Contacte al administrador");
+                        }
+                    }
+                    if (!onCredit && paymentData && paymentData.isPaid) {
+                        // Determine correct payment description based on currency
+                        const paymentDescription = paymentData.currency === 'VES' ? 'Transferencia Bs' : 'Transferencia USD';
+
+                        // Validate paymentData.amount and provide a default value if needed
+                        const paymentAmount = paymentData.amount && !isNaN(parseFloat(paymentData.amount)) ? parseFloat(paymentData.amount).toFixed(2) : '0.00';
+
+                        // Determine reference based on payment method
+                        let paymentReference = paymentData.reference;
+                        let banco = paymentData.banco;
+                        if (paymentData.metodoPago === 'efectivo') {
+                            paymentReference = `Pago efectivo ${paymentData.currency} A factura: ${controlNumber} fecha: ${formattedDate}`;
+                            banco = `Efectivo ${paymentData.currency}`;
+                        }
+
+                        // Construct PagoRequest
+                        const pagoRequest: PagoRequest = {
+                            documento_afectado: documento.numero_control,  // Or use the actual invoice number, if available
+                            desc_tipo_pago: paymentDescription,
+                            monto: parseFloat(paymentAmount), // Convert paymentAmount to a number
+                            fecha_pago: formattedDate,
+                            usuario: user?.username || 'usuario',
+                            tasa_cambio: parseFloat(paymentData.exchangeRate),
+                            moneda: paymentData.currency, // Correct currency (VES or USD)
+                            referencia: paymentReference, // Using the conditional paymentReference
+                            banco: banco,
+                            status: 'PROCESADO'  //  or a similar status that your backend recognizes
+                        };
+
+                        try {
+                            // Register payment
+                            const paymentResponse = await invoiceService.registerPayment(pagoRequest);
+                            console.log('Payment registered successfully:', paymentResponse);
+                            toast.success('Pago registrado con éxito');
+                        } catch (paymentError: any) {
+                            console.error('Error al registrar el pago:', paymentError);
+                            toast.error(paymentError.message || 'Error al registrar el pago');
+                        }
+                    } else if (onCredit) {
+                        toast.success('Venta a crédito completada con éxito');
                     }
 
-                    // Construct PagoRequest
-                    const pagoRequest: PagoRequest = {
-                        documento_afectado: documento.numero_control,  // Or use the actual invoice number, if available
-                        desc_tipo_pago: paymentDescription,
-                        monto: parseFloat(paymentAmount), // Convert paymentAmount to a number
-                        fecha_pago: formattedDate,
-                        usuario: user?.username || 'usuario',
-                        tasa_cambio: parseFloat(paymentData.exchangeRate),
-                        moneda: paymentData.currency, // Correct currency (VES or USD)
-                        referencia: paymentReference, // Using the conditional paymentReference
-                        banco: banco,
-                        status: 'PROCESADO'  //  or a similar status that your backend recognizes
-                    };
+                    clearCart();
+                    toast.success('Venta completada con éxito');
+                    setPaymentModalOpen(false);
 
-                    try {
-                        // Register payment
-                        const paymentResponse = await invoiceService.registerPayment(pagoRequest);
-                        console.log('Payment registered successfully:', paymentResponse);
-                        toast.success('Pago registrado con éxito');
-                    } catch (paymentError: any) {
-                        console.error('Error al registrar el pago:', paymentError);
-                        toast.error(paymentError.message || 'Error al registrar el pago');
-                    }
-                } else if (onCredit) {
-                    toast.success('Venta a crédito completada con éxito');
-                    /*const pagoRequest: PagoRequest = {
-                        documento_afectado: documento.numero_control,  // Or use the actual invoice number, if available
-                        desc_tipo_pago: 'A Crédito',
-                        monto: parseFloat(totals.grandTotal.toFixed(2)), // default to the grand total WITH toFixed(2)
-                        fecha_pago: formattedDate,
-                        usuario: user?.username || 'usuario',
-                        tasa_cambio: 1,
-                        moneda: 'VES',
-                        referencia: 'A Crédito',
-                        banco: 'A Crédito',
-                        status: 'PROCESADO'  //  or a similar status that your backend recognizes
-                    };
-                    try {
-                        // Register credit as payment
-                        const paymentResponse = await invoiceService.registerPayment(pagoRequest);
-                        console.log('Credit registered successfully:', paymentResponse);
-                        toast.success('Crédito registrado con éxito');
-                    } catch (paymentError: any) {
-                        console.error('Error al registrar el crédito:', paymentError);
-                        toast.error(paymentError.message || 'Error al registrar el crédito');
-                    }*/
+                    // *NOW* navigate to the invoice details page, using the controlNumber we already generated
+                    navigate(`/invoices/${controlNumber}`);
+
+                } else {
+                    // Handle invoice creation failure
+                    console.error("Error in response in createInvoice function", response)
+                    toast.error('Error al procesar la venta. Por favor, contacte al administrador.');
                 }
-
-                clearCart();
-                toast.success('Venta completada con éxito');
-                setPaymentModalOpen(false);
-
-                navigate(`/invoices/${invoiceNumber}`);
             }
             catch (error: any) {
                 console.error('Error al completar la venta:', error);
@@ -418,7 +534,10 @@ const POS: React.FC = () => {
         setShowCreditOption(false); // close this after processing
     };
 
+    const showPaymentButtons = items.length > 0 && customer.razonSocial && customer.registroFiscal;
+
     return (
+
         <div className="h-[calc(100vh-6rem)] flex flex-col md:flex-row">
             {/* Left side - Product Selection */}
             <div className="w-full md:w-2/3 p-4 overflow-auto h-1/2 md:h-full">
@@ -595,7 +714,7 @@ const POS: React.FC = () => {
                 {/* Cart items */}
                 <div className="flex-1 overflow-y-auto">
                     {items.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-gray-500">
+                        <div className="h-full flex flex-col items-center justify-center text items-center justify-center text-gray-500">
                             <Package className="h-12 w-12 mb-2" />
                             <p>El carrito está vacío</p>
                         </div>
@@ -657,11 +776,10 @@ const POS: React.FC = () => {
                         </div>
                         <div className="flex justify-between">
                             <span>IVA (16%):</span>
-                            <span>VES {totals.tax.toFixed(2)}</span>
-                        </div>
-                        {totals.igtf > 0 && (
-                            <div className="flex justify-between">
-                                <span>IGTF (3%):</span>
+                            <span>VES {totals.tax.toFixed(2)}
+                            </span>
+                        </div>                        {totals.igtf > 0 && (
+                            <div className="flex justify-between">                                <span>IGTF (3%):</span>
                                 <span>VES {totals.igtf.toFixed(2)}</span>
                             </div>
                         )}
@@ -671,33 +789,36 @@ const POS: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="mt-4 flex flex-col space-y-2">
-                        {/* Display "Process on Credit" button only if it's enabled in backend */}
-                        <button
-                            onClick={() => setShowCreditOption(true)}
-                            className="btn btn-secondary flex-1 flex justify-center items-center"
-                            disabled={items.length === 0}
-                        >
-                            <CreditCard className="h-4 w-4 mr-1" />
-                            A Crédito
-                        </button>
+                    {/* Conditionally render payment buttons */}
+                    {showPaymentButtons && !noCorrelativoAlert && !correlativoLoading && (
+                        <div className="mt-4 flex flex-col space-y-2">
+                            {/* Display "Process on Credit" button only if it's enabled in backend */}
+                            <button
+                                onClick={() => setShowCreditOption(true)}
+                                className="btn btn-secondary flex-1 flex justify-center items-center"
+                                disabled={correlativoLoading || noCorrelativoAlert}
+                            >
+                                <CreditCard className="h-4 w-4 mr-1" />
+                                A Crédito
+                            </button>
 
-                        <button
-                            onClick={() => setPaymentModalOpen(true)}
-                            className="btn btn-primary flex-1 flex justify-center items-center"
-                            disabled={items.length === 0}
-                        >
-                            <CreditCard className="h-4 w-4 mr-1" />
-                            Pagar
-                        </button>
-                        {showCreditOption && (
-                            <ConfirmationModal
-                                message="¿Desea procesar la venta a crédito?"
-                                onConfirm={handleProcessOnCredit}
-                                onCancel={() => setShowCreditOption(false)}
-                            />
-                        )}
-                    </div>
+                            <button
+                                onClick={() => setPaymentModalOpen(true)}
+                                className="btn btn-primary flex-1 flex justify-center items-center"
+                                disabled={correlativoLoading || noCorrelativoAlert}
+                            >
+                                <CreditCard className="h-4 w-4 mr-1" />
+                                Pagar
+                            </button>
+                            {showCreditOption && (
+                                <ConfirmationModal
+                                    message="¿Desea procesar la venta a crédito?"
+                                    onConfirm={handleProcessOnCredit}
+                                    onCancel={() => setShowCreditOption(false)}
+                                />
+                            )}
+                        </div>
+                    )}
 
                 </div>
             </div>
@@ -709,7 +830,7 @@ const POS: React.FC = () => {
 
 
                         <div className="flex justify-end space-x-3 pt-4">
-                            <button                                 type="button"
+                            <button type="button"
                                 className="btn btn-secondary"
                                 onClick={() => setCustomerModalOpen(false)}
                             >
@@ -795,6 +916,45 @@ const POS: React.FC = () => {
                     onCancel={() => setShowCreditOption(false)}
                 />
             )}
+
+            {/* Correlativo Loading Overlay */}
+            {correlativoLoading && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <LoadingSpinner text="Cargando correlativo..." />
+                </div>
+            )}
+
+            {/* No Correlativo Alert */}
+            {noCorrelativoAlert && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
+                        <div className="flex items-start">
+                            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-error-100 sm:mx-0 sm:h-10 sm:w-10">
+                                <AlertTriangle className="h-6 w-6 text-error-600" aria-hidden="true" />
+                            </div>
+                            <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                                <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                                    Error
+                                </h3>
+                                <div className="mt-2">
+                                    <p className="text-sm text-gray-500">
+                                        No se encontró información del correlativo.  Por favor, contacte al administrador.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end space-x-3 mt-6">
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => setNoCorrelativoAlert(false)}
+                            >
+                                Aceptar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -817,7 +977,6 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
     const [exchangeRate, setExchangeRate] = useState('1');
     const [paymentCurrency, setPaymentCurrency] = useState('VES');
     const [amountError, setAmountError] = useState('');
-
     useEffect(() => {
         // Update amount when total changes to keep the value updated on VES, formatted to 2 decimal places
         setAmount(total.toFixed(2));
@@ -1030,54 +1189,6 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
                         </button>
                     </div>
                 </form>
-            </div>
-        </div>
-    );
-};
-
-// Component for Confirmation Modals
-interface ConfirmationModalProps {
-    message: string;
-    onConfirm: () => void;
-    onCancel: () => void;
-}
-
-const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ message, onConfirm, onCancel }) => {
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
-                <div className="flex items-start">
-                    <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-warning-100 sm:mx-0 sm:h-10 sm:w-10">
-                        <AlertTriangle className="h-6 w-6 text-warning-600" aria-hidden="true" />
-                    </div>
-                    <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                        <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                            Confirmación
-                        </h3>
-                        <div className="mt-2">
-                            <p className="text-sm text-gray-500">
-                                {message}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex justify-end space-x-3 mt-6">
-                    <button
-                        type="button"
-                        className="btn btn-secondary"
-                        onClick={onCancel}
-                    >
-                        Cancelar
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={onConfirm}
-                    >
-                        Confirmar
-                    </button>
-                </div>
             </div>
         </div>
     );
