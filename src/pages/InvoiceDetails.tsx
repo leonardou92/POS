@@ -166,6 +166,13 @@ const InvoiceDetails: React.FC = () => {
     ND: 'Nota de Débito',
   };
 
+  // Helper function to format numbers with 2 decimal places
+    const formatCurrency = (amount: number | undefined): string => {
+        if (amount === undefined) return '0.00';
+        return Number(amount).toFixed(2);
+    };
+
+
   if (loading) {
     return (
       <div className="py-12 flex justify-center">
@@ -354,20 +361,20 @@ const InvoiceDetails: React.FC = () => {
                           {detail.cantidad}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                          ${Number(detail.precio_unitario).toFixed(2)}
+                          VES {formatCurrency(detail.precio_unitario)}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900 text-right">
                           {detail.es_exento ? (
                             <span className="text-xs font-medium text-gray-500">Exento</span>
                           ) : (
                             <>
-                              ${Number(detail.monto_iva).toFixed(2)}
+                              VES {formatCurrency(detail.monto_iva)}
                               <div className="text-xs text-gray-500">{detail.porcentaje_iva}%</div>
                             </>
                           )}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
-                          ${Number(detail.monto_total).toFixed(2)}
+                          VES {formatCurrency(detail.monto_total)}
                         </td>
                       </tr>
                     ))}
@@ -423,7 +430,7 @@ const InvoiceDetails: React.FC = () => {
                             {formatDate(payment.fecha_pago)}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
-                            ${Number(payment.monto).toFixed(2)}
+                            VES {formatCurrency(payment.monto)}
                             <div className="text-xs text-gray-500">
                               {payment.moneda} (TC: {payment.tasa_cambio})
                             </div>
@@ -452,48 +459,48 @@ const InvoiceDetails: React.FC = () => {
               <div className="space-y-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Subtotal:</span>
-                  <span className="text-gray-900">${Number(invoice.subtotal).toFixed(2)}</span>
+                  <span className="text-gray-900">VES {formatCurrency(invoice.subtotal)}</span>
                 </div>
 
                 {Number(invoice.monto_exento) > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Monto exento:</span>
-                    <span className="text-gray-900">${Number(invoice.monto_exento).toFixed(2)}</span>
+                    <span className="text-gray-900">VES {formatCurrency(invoice.monto_exento)}</span>
                   </div>
                 )}
 
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Base imponible:</span>
-                  <span className="text-gray-900">${Number(invoice.base_imponible).toFixed(2)}</span>
+                  <span className="text-gray-900">VES {formatCurrency(invoice.base_imponible)}</span>
                 </div>
 
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">IVA ({invoice.porcentaje_iva}%):</span>
-                  <span className="text-gray-900">${Number(invoice.monto_iva).toFixed(2)}</span>
+                  <span className="text-gray-900">VES {formatCurrency(invoice.monto_iva)}</span>
                 </div>
 
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Total:</span>
-                  <span className="text-gray-900">${Number(invoice.total).toFixed(2)}</span>
+                  <span className="text-gray-900">VES {formatCurrency(invoice.total)}</span>
                 </div>
 
                 {Number(invoice.monto_igtf) > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">IGTF ({invoice.porcentaje_igtf}%):</span>
-                    <span className="text-gray-900">${Number(invoice.monto_igtf).toFixed(2)}</span>
+                    <span className="text-gray-900">VES {formatCurrency(invoice.monto_igtf)}</span>
                   </div>
                 )}
 
                 <div className="flex justify-between font-bold pt-3 border-t">
                   <span>Total General:</span>
-                  <span>${Number(invoice.total_general).toFixed(2)}</span>
+                  <span>VES {formatCurrency(invoice.total_general)}</span>
                 </div>
 
                 {invoice.conversion_moneda && (
                   <div className="flex justify-between text-sm pt-2">
                     <span className="text-gray-500">En {invoice.conversion_moneda}:</span>
                     <span className="text-gray-900">
-                      {(Number(invoice.total_general) * Number(invoice.tasa_cambio)).toFixed(2)} {invoice.conversion_moneda}
+                      {(Number(invoice.total_general) / Number(invoice.tasa_cambio)).toFixed(2)} {invoice.conversion_moneda}
                     </span>
                   </div>
                 )}

@@ -1,3 +1,5 @@
+// pages/POS.tsx
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
@@ -12,11 +14,12 @@ import {
     DollarSign,
     Receipt,
     Search as SearchIcon,
-    Info
+    Info,
+    AlertTriangle, // AlertTriangle
 } from 'lucide-react';
 import { useCartStore, getCartTotals } from '../stores/cartStore';
 import { invoiceService } from '../services/api';
-import { InvoiceRequest, Document, Detail, Product, GetProductsResponse, Client } from '../types/api';
+import { InvoiceRequest, Document, Detail, Product, GetProductsResponse, Client, PagoRequest } from '../types/api';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 
@@ -34,14 +37,15 @@ const POS: React.FC = () => {
     const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [customerSearchTerm, setCustomerSearchTerm] = useState(''); // Customer search term
-   // const [customers, setCustomers] = useState<Client[]>([]); // customers REMOVED
+    // const [customers, setCustomers] = useState<Client[]>([]); // customers REMOVED
     const [customerListLoading, setCustomerListLoading] = useState(false); // Loading for Customer List
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage] = useState(12);
     const [rifSearchModalOpen, setRifSearchModalOpen] = useState(false); // State for RIF search modal
-     const [rifSearchResult, setRifSearchResult] = useState<Client | null>(null); // State to store RIF search result
+    const [rifSearchResult, setRifSearchResult] = useState<Client | null>(null); // State to store RIF search result
     const [rifSearchLoading, setRifSearchLoading] = useState(false); // Loading state for RIF search
     const [rifSearchTerm, setRifSearchTerm] = useState(''); //Local RIF search
+    const [showCreditOption, setShowCreditOption] = useState(false); // Display credit option
 
     useEffect(() => {
         const fetchProducts = async () => {
@@ -101,7 +105,7 @@ const POS: React.FC = () => {
         setSearchTerm(event.target.value.toLowerCase());
         setCurrentPage(1); // Reset to first page on search
     };
-     const handleCustomerSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const handleCustomerSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
         setCustomerSearchTerm(event.target.value.toLowerCase());
     };
 
@@ -122,7 +126,7 @@ const POS: React.FC = () => {
     const currentItems = filteredProductsList.slice(indexOfFirstItem, indexOfLastItem);
     const totalPages = Math.ceil(filteredProductsList.length / itemsPerPage);
 
-        const handleSelectCustomer = (client: Client) => {
+    const handleSelectCustomer = (client: Client) => {
         setCustomer({
             razonSocial: client.razonSocial,
             registroFiscal: client.registroFiscal,
@@ -135,10 +139,10 @@ const POS: React.FC = () => {
     };
 
     const handleOpenRifSearchModal = () => {
-         console.log('handleOpenRifSearchModal');
+        console.log('handleOpenRifSearchModal');
         setRifSearchModalOpen(true);
         setRifSearchTerm(""); // Clear any previous search term
-         setRifSearchResult(null);
+        setRifSearchResult(null);
     };
 
     const handleCloseRifSearchModal = () => {
@@ -147,7 +151,7 @@ const POS: React.FC = () => {
     };
 
     const handleSearchByRif = async () => {
-       console.log('handleSearchByRif');
+        console.log('handleSearchByRif');
         try {
             setRifSearchLoading(true);
             const apiResponse = await invoiceService.getCustomersByRif(rifSearchTerm);
@@ -200,7 +204,7 @@ const POS: React.FC = () => {
             setRifSearchResult(null);
         }
     };
-      
+
 
     const handleAddProduct = (product: Product) => {
         addItem({
@@ -226,7 +230,7 @@ const POS: React.FC = () => {
         }
     };
 
-    const handleCompleteSale = async (paymentData: any) => {
+    const handleCompleteSale = async (paymentData: any, onCredit: boolean = false) => {
         if (items.length === 0) {
             toast.error('El carrito está vacío');
             return;
@@ -234,6 +238,11 @@ const POS: React.FC = () => {
 
         if (!customer.razonSocial || !customer.registroFiscal) {
             setCustomerModalOpen(true);
+            return;
+        }
+
+        if (!onCredit && !paymentData) {
+            setShowCreditOption(true);
             return;
         }
 
@@ -246,6 +255,15 @@ const POS: React.FC = () => {
 
             let invoiceNumber = '1';
 
+            // Calculate totals in VES based on currency and exchange rate
+            const totalGeneralVES = paymentData?.paymentCurrency === 'USD' ? (totals.grandTotal * paymentData?.exchangeRate) : totals.grandTotal;
+            const montoExentoVES = paymentData?.paymentCurrency === 'USD' ? (totals.exemptAmount * paymentData?.exchangeRate) : totals.exemptAmount;
+            const baseImponibleVES = paymentData?.paymentCurrency === 'USD' ? (totals.taxableAmount * paymentData?.exchangeRate) : totals.taxableAmount;
+            const subtotalVES = paymentData?.paymentCurrency === 'USD' ? (totals.subtotal * paymentData?.exchangeRate) : totals.subtotal;
+            const montoIvaVES = paymentData?.paymentCurrency === 'USD' ? (totals.tax * paymentData?.exchangeRate) : totals.tax;
+            const totalVES = paymentData?.paymentCurrency === 'USD' ? (totals.total * paymentData?.exchangeRate) : totals.total;
+            const igtfVES = paymentData?.paymentCurrency === 'USD' ? (totals.igtf * paymentData?.exchangeRate) : totals.igtf;
+
             const documento: Document = {
                 tipo_documento: 'FA',
                 numero_documento: invoiceNumber,
@@ -257,46 +275,52 @@ const POS: React.FC = () => {
                 e_mail: customer.email || 'cliente@ejemplo.com',
                 telefono: 'No especificado',
                 descripcion: 'Venta de productos',
-                moneda_principal: 'USD',
+                moneda_principal: 'VES', // Base currency is VES
                 balance_anterior: 0,
-                monto_exento: totals.exemptAmount,
-                base_imponible: totals.taxableAmount,
-                subtotal: totals.subtotal,
-                monto_iva: totals.tax,
+                monto_exento: montoExentoVES,
+                base_imponible: baseImponibleVES,
+                subtotal: subtotalVES,
+                monto_iva: montoIvaVES,
                 porcentaje_iva: 16,
                 base_reducido: 0,
                 monto_iva_reducido: 0,
-                porcentaje_iva_reducido: 0,
-                total: totals.total,
-                base_igtf: totals.total,
-                monto_igtf: totals.igtf,
+                porcentaje_iva_reducido: 0, // Added missing property
+                total: totalVES,
+                base_igtf: totalVES,
+                monto_igtf: igtfVES,
                 porcentaje_igtf: 3,
-                total_general: totals.grandTotal,
-                conversion_moneda: paymentData.moneda || 'USD',
-                tasa_cambio: paymentData.tasaCambio || 1,
+                total_general: totalGeneralVES,
+                conversion_moneda: paymentData?.currency || 'VES',
+                tasa_cambio: paymentData?.exchangeRate || 1,
                 direccion_envio: customer.direccionEnvio || 'test',
                 serie_strong_id: 'POS-' + Date.now().toString(),
                 serie: 'A',
                 usuario: user?.username || 'usuario',
-                status: 'PROCESADO',
+                status: 'PROCESADO', // Even for credit, set it to PROCESSED initially
                 motivo_anulacion: '',
                 tipo_documento_afectado: '',
                 numero_documento_afectado: ''
             };
 
-            const detalles: Detail[] = items.map((item) => ({
-                codigo: item.codigo,
-                descripcion: item.descripcion,
-                cantidad: item.cantidad,
-                precio_unitario: item.precio_unitario,
-                monto: item.monto,
-                monto_total: item.monto_total,
-                monto_iva: item.monto_iva,
-                monto_descuento: item.monto_descuento,
-                porcentaje_descuento: item.porcentaje_descuento,
-                porcentaje_iva: item.porcentaje_iva,
-                es_exento: item.es_exento,
-            }));
+            const detalles: Detail[] = items.map((item) => {
+                const itemMontoExentoVES = paymentData?.paymentCurrency === 'USD' ? (item.monto * paymentData?.exchangeRate) : item.monto;
+                const itemMontoTotalVES = paymentData?.paymentCurrency === 'USD' ? (item.monto_total * paymentData?.exchangeRate) : item.monto_total;
+                const itemMontoIvaVES = paymentData?.paymentCurrency === 'USD' ? (item.monto_iva * paymentData?.exchangeRate) : item.monto_iva;
+
+                return {
+                    codigo: item.codigo,
+                    descripcion: item.descripcion,
+                    cantidad: item.cantidad,
+                    precio_unitario: item.precio_unitario,
+                    monto: itemMontoExentoVES,
+                    monto_total: itemMontoTotalVES,
+                    monto_iva: itemMontoIvaVES,
+                    monto_descuento: item.monto_descuento,
+                    porcentaje_descuento: item.porcentaje_descuento,
+                    porcentaje_iva: item.porcentaje_iva,
+                    es_exento: item.es_exento,
+                };
+            });
 
             const invoiceRequest: InvoiceRequest = {
                 documento,
@@ -306,12 +330,70 @@ const POS: React.FC = () => {
             try {
                 const response = await invoiceService.createInvoice(invoiceRequest);
 
-                if (paymentData.isPaid) {
-                    //  implement registerPayment
+                if (!onCredit && paymentData && paymentData.isPaid) {
+                    // Determine correct payment description based on currency
+                    const paymentDescription = paymentData.currency === 'VES' ? 'Transferencia Bs' : 'Transferencia USD';
+
+                    // Validate paymentData.amount and provide a default value if needed
+                    const paymentAmount = paymentData.amount && !isNaN(parseFloat(paymentData.amount)) ? parseFloat(paymentData.amount).toFixed(2) : '0.00';
+
+                    // Determine reference based on payment method
+                    let paymentReference = paymentData.reference;
+                    let banco = paymentData.banco;
+                    if (paymentData.metodoPago === 'efectivo') {
+                        paymentReference = `Pago efectivo ${paymentData.currency} A factura: ${invoiceNumber} fecha: ${formattedDate}`;
+                        banco = `Efectivo ${paymentData.currency}`;
+                    }
+
+                    // Construct PagoRequest
+                    const pagoRequest: PagoRequest = {
+                        documento_afectado: documento.numero_control,  // Or use the actual invoice number, if available
+                        desc_tipo_pago: paymentDescription,
+                        monto: parseFloat(paymentAmount), // Convert paymentAmount to a number
+                        fecha_pago: formattedDate,
+                        usuario: user?.username || 'usuario',
+                        tasa_cambio: parseFloat(paymentData.exchangeRate),
+                        moneda: paymentData.currency, // Correct currency (VES or USD)
+                        referencia: paymentReference, // Using the conditional paymentReference
+                        banco: banco,
+                        status: 'PROCESADO'  //  or a similar status that your backend recognizes
+                    };
+
+                    try {
+                        // Register payment
+                        const paymentResponse = await invoiceService.registerPayment(pagoRequest);
+                        console.log('Payment registered successfully:', paymentResponse);
+                        toast.success('Pago registrado con éxito');
+                    } catch (paymentError: any) {
+                        console.error('Error al registrar el pago:', paymentError);
+                        toast.error(paymentError.message || 'Error al registrar el pago');
+                    }
+                } else if (onCredit) {
+                    toast.success('Venta a crédito completada con éxito');
+                    /*const pagoRequest: PagoRequest = {
+                        documento_afectado: documento.numero_control,  // Or use the actual invoice number, if available
+                        desc_tipo_pago: 'A Crédito',
+                        monto: parseFloat(totals.grandTotal.toFixed(2)), // default to the grand total WITH toFixed(2)
+                        fecha_pago: formattedDate,
+                        usuario: user?.username || 'usuario',
+                        tasa_cambio: 1,
+                        moneda: 'VES',
+                        referencia: 'A Crédito',
+                        banco: 'A Crédito',
+                        status: 'PROCESADO'  //  or a similar status that your backend recognizes
+                    };
+                    try {
+                        // Register credit as payment
+                        const paymentResponse = await invoiceService.registerPayment(pagoRequest);
+                        console.log('Credit registered successfully:', paymentResponse);
+                        toast.success('Crédito registrado con éxito');
+                    } catch (paymentError: any) {
+                        console.error('Error al registrar el crédito:', paymentError);
+                        toast.error(paymentError.message || 'Error al registrar el crédito');
+                    }*/
                 }
 
                 clearCart();
-
                 toast.success('Venta completada con éxito');
                 setPaymentModalOpen(false);
 
@@ -327,7 +409,13 @@ const POS: React.FC = () => {
             toast.error('Error al procesar la venta');
         } finally {
             setLoading(false);
+            setShowCreditOption(false);
         }
+    };
+    const handleProcessOnCredit = () => {
+        // Call complete sale without payment data, to indicate it's on credit
+        handleCompleteSale(null, true);
+        setShowCreditOption(false); // close this after processing
     };
 
     return (
@@ -396,7 +484,7 @@ const POS: React.FC = () => {
                                             </div>
                                         </div>
                                         <div className="mt-2 flex justify-between items-end">
-                                            <span className="text-lg font-bold text-gray-900">${parseFloat(product.price.toString()).toFixed(2)}</span>
+                                            <span className="text-lg font-bold text-gray-900">VES {parseFloat(product.price.toString()).toFixed(2)}</span>
                                             <button
                                                 onClick={() => handleAddProduct(product)}
                                                 className="flex items-center justify-center bg-primary-600 hover:bg-primary-700 text-white rounded p-1"
@@ -478,14 +566,14 @@ const POS: React.FC = () => {
                     </h2>
 
                     <div className="flex gap-2">
-                         <button
+                        <button
                             onClick={() => handleOpenRifSearchModal()}
                             className="btn btn-secondary btn-sm flex items-center"
-                         >
+                        >
                             <Info className="h-4 w-4 mr-1" />
                             RIF
-                         </button>
-                       {/* <button
+                        </button>
+                        {/* <button
                             onClick={() => handleOpenCustomerModal()}
                             className="btn btn-secondary btn-sm flex items-center"
                         >
@@ -513,49 +601,49 @@ const POS: React.FC = () => {
                         </div>
                     ) : (
                         <div className="space-y-3">{items.map((item) => (
-                                <div key={item.codigo} className="bg-white p-3 rounded shadow-sm">
-                                    <div className="flex justify-between">
-                                        <div className="flex-1">
-                                            <div className="font-medium">{item.descripcion}</div>
-                                            <div className="text-sm text-gray-500">{item.codigo}</div>
-                                        </div>
-                                        <div className="flex items-center space-x-1">
-                                            <button
-                                                onClick={() => removeItem(item.codigo)}
-                                                className="text-gray-400 hover:text-error-500"
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                            </button>
-                                        </div>
+                            <div key={item.codigo} className="bg-white p-3 rounded shadow-sm">
+                                <div className="flex justify-between">
+                                    <div className="flex-1">
+                                        <div className="font-medium">{item.descripcion}</div>
+                                        <div className="text-sm text-gray-500">{item.codigo}</div>
+                                    </div>
+                                    <div className="flex items-center space-x-1">
+                                        <button
+                                            onClick={() => removeItem(item.codigo)}
+                                            className="text-gray-400 hover:text-error-500"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="mt-2 flex justify-between items-center">
+                                    <div className="flex items-center border rounded">
+                                        <button
+                                            onClick={() => updateQuantity(item.codigo, item.cantidad - 1)}
+                                            className="px-2 py-1 text-gray-500 hover:bg-gray-100"
+                                        >
+                                            <Minus className="h-3 w-3" />
+                                        </button>
+                                        <span className="px-2 py-1 text-center w-10">{item.cantidad}</span>
+                                        <button
+                                            onClick={() => updateQuantity(item.codigo, item.cantidad + 1)}
+                                            className="px-2 py-1 text-gray-500 hover:bg-gray-100"
+                                        >
+                                            <Plus className="h-3 w-3" />
+                                        </button>
                                     </div>
 
-                                    <div className="mt-2 flex justify-between items-center">
-                                        <div className="flex items-center border rounded">
-                                            <button
-                                                onClick={() => updateQuantity(item.codigo, item.cantidad - 1)}
-                                                className="px-2 py-1 text-gray-500 hover:bg-gray-100"
-                                            >
-                                                <Minus className="h-3 w-3" />
-                                            </button>
-                                            <span className="px-2 py-1 text-center w-10">{item.cantidad}</span>
-                                            <button
-                                                onClick={() => updateQuantity(item.codigo, item.cantidad + 1)}
-                                                className="px-2 py-1 text-gray-500 hover:bg-gray-100"
-                                            >
-                                                <Plus className="h-3 w-3" />
-                                            </button>
-                                        </div>
-
-                                        <div className="text-right">
-                                            <div className="font-bold">${(item.monto_total).toFixed(2)}</div>
-                                            <div className="text-xs text-gray-500">
-                                                ${item.precio_unitario.toFixed(2)} x {item.cantidad}
-                                                {item.monto_iva > 0 && ` + IVA ${item.porcentaje_iva}%`}
-                                            </div>
+                                    <div className="text-right">
+                                        <div className="font-bold">VES {(item.monto_total).toFixed(2)}</div>
+                                        <div className="text-xs text-gray-500">
+                                            VES {item.precio_unitario.toFixed(2)} x {item.cantidad}
+                                            {item.monto_iva > 0 && ` + IVA ${item.porcentaje_iva}%`}
                                         </div>
                                     </div>
                                 </div>
-                            ))}
+                            </div>
+                        ))}
                         </div>
                     )}
                 </div>
@@ -565,33 +653,35 @@ const POS: React.FC = () => {
                     <div className="space-y-1 text-sm">
                         <div className="flex justify-between">
                             <span>Subtotal:</span>
-                            <span>${totals.subtotal.toFixed(2)}</span>
+                            <span>VES {totals.subtotal.toFixed(2)}</span>
                         </div>
                         <div className="flex justify-between">
                             <span>IVA (16%):</span>
-                            <span>${totals.tax.toFixed(2)}</span>
+                            <span>VES {totals.tax.toFixed(2)}</span>
                         </div>
                         {totals.igtf > 0 && (
                             <div className="flex justify-between">
                                 <span>IGTF (3%):</span>
-                                <span>${totals.igtf.toFixed(2)}</span>
+                                <span>VES {totals.igtf.toFixed(2)}</span>
                             </div>
                         )}
                         <div className="flex justify-between font-bold border-t border-gray-200 pt-2 mt-2">
                             <span>Total:</span>
-                            <span>${totals.grandTotal.toFixed(2)}</span>
+                            <span>VES {totals.grandTotal.toFixed(2)}</span>
                         </div>
                     </div>
 
-                    <div className="mt-4 flex space-x-2">
+                    <div className="mt-4 flex flex-col space-y-2">
+                        {/* Display "Process on Credit" button only if it's enabled in backend */}
                         <button
-                            onClick={() => clearCart()}
+                            onClick={() => setShowCreditOption(true)}
                             className="btn btn-secondary flex-1 flex justify-center items-center"
                             disabled={items.length === 0}
                         >
-                            <Trash2 className="h-4 w-4 mr-1" />
-                            Limpiar
+                            <CreditCard className="h-4 w-4 mr-1" />
+                            A Crédito
                         </button>
+
                         <button
                             onClick={() => setPaymentModalOpen(true)}
                             className="btn btn-primary flex-1 flex justify-center items-center"
@@ -600,7 +690,15 @@ const POS: React.FC = () => {
                             <CreditCard className="h-4 w-4 mr-1" />
                             Pagar
                         </button>
+                        {showCreditOption && (
+                            <ConfirmationModal
+                                message="¿Desea procesar la venta a crédito?"
+                                onConfirm={handleProcessOnCredit}
+                                onCancel={() => setShowCreditOption(false)}
+                            />
+                        )}
                     </div>
+
                 </div>
             </div>
 
@@ -608,57 +706,17 @@ const POS: React.FC = () => {
             {customerModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
-                        <h3 className="text-xl font-bold mb-4">Información del cliente</h3>
-                         <div className="relative mb-4">
-                            <input
-                                type="text"
-                                className="input pl-10 w-full"
-                                placeholder="Buscar cliente..."
-                                value={customerSearchTerm}
-                                onChange={handleCustomerSearch}
-                            />
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <SearchIcon className="h-5 w-5 text-gray-400"  viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"/>
-                            </div>
-                        </div>
-                      {/* <div className="h-40 overflow-y-auto">  REMOVED CUSTOMER LIST FUNCTIONALITY
-                            {loading ? (
-                                <div className="flex justify-center">
-                                    <LoadingSpinner size="sm" text="Cargando clientes..." />
-                                </div>
-                            ) :  (
-                                filteredCustomers.map(client => (
-                                    <div
-                                        key={client.id}
-                                        className="p-2 hover:bg-gray-100 cursor-pointer"
-                                        onClick={() => {
-                                            setCustomer({
-                                                razonSocial: client.razonSocial,
-                                                registroFiscal: client.registroFiscal,
-                                                direccionFiscal: client.direccionFiscal,
-                                                email: client.email,
-                                                telefono: client.telefono,
-                                                direccionEnvio: client.direccionEnvio,
-                                            });
-                                            setCustomerModalOpen(false);
-                                        }}
-                                    >
-                                        {client.razonSocial} ({client.registroFiscal})
-                                    </div>
-                                ))
-                            )}
-                    </div> */}
 
-                            <div className="flex justify-end space-x-3 pt-4">
-                                <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    onClick={() => setCustomerModalOpen(false)}
-                                >
-                                    Cancelar
-                                </button>
-                               
-                            </div>
+
+                        <div className="flex justify-end space-x-3 pt-4">
+                            <button                                 type="button"
+                                className="btn btn-secondary"
+                                onClick={() => setCustomerModalOpen(false)}
+                            >
+                                Cancelar
+                            </button>
+
+                        </div>
                     </div>
                 </div>
             )}
@@ -672,8 +730,8 @@ const POS: React.FC = () => {
                     loading={loading}
                 />
             )}
-               {/* RIF Search Modal */}
-             {rifSearchModalOpen && (
+            {/* RIF Search Modal */}
+            {rifSearchModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
                         <h3 className="text-xl font-bold mb-4">Buscar Cliente por RIF</h3>
@@ -729,6 +787,14 @@ const POS: React.FC = () => {
                     </div>
                 </div>
             )}
+            {/* Show Credit Option Confirmation Modal */}
+            {showCreditOption && (
+                <ConfirmationModal
+                    message="¿Procesar la venta a crédito?"
+                    onConfirm={handleProcessOnCredit}
+                    onCancel={() => setShowCreditOption(false)}
+                />
+            )}
         </div>
     );
 };
@@ -743,27 +809,65 @@ interface PaymentModalProps {
 
 const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete, loading }) => {
     const [paymentMethod, setPaymentMethod] = useState('efectivo');
-    const [amount, setAmount] = useState(total.toString());
+    const [amount, setAmount] = useState(''); // Initialize as empty string
     const [reference, setReference] = useState('');
     const [bank, setBank] = useState(' ');
     const [isPaid, setIsPaid] = useState(true);
-    const [currency, setCurrency] = useState('USD');
+    const [currency, setCurrency] = useState('VES'); // Default to VES
     const [exchangeRate, setExchangeRate] = useState('1');
+    const [paymentCurrency, setPaymentCurrency] = useState('VES');
+    const [amountError, setAmountError] = useState('');
+
+    useEffect(() => {
+        // Update amount when total changes to keep the value updated on VES, formatted to 2 decimal places
+        setAmount(total.toFixed(2));
+    }, [total]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (!amount) {
+            setAmountError('El monto es requerido');
+            return;
+        }
 
         const paymentData = {
             metodoPago: paymentMethod,
-            monto: parseFloat(amount),
+            amount: amount, // Use the formatted amount from state
             referencia: reference,
             banco: bank,
-            isPaid,
-            moneda: currency,
-            tasaCambio: parseFloat(exchangeRate),
+            isPaid: true, //Mark as paid is always true, since now credit option is shown before calling to the Payment modal
+            currency: currency,
+            exchangeRate: parseFloat(exchangeRate),
+            paymentCurrency: paymentCurrency, // Add paymentCurrency
+            //  total:total
         };
 
         onComplete(paymentData);
+    };
+
+    const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setAmount(value);
+
+        if (!value) {
+            setAmountError('El monto es requerido');
+        } else if (isNaN(parseFloat(value))) {
+            setAmountError('El monto debe ser un número');
+        } else {
+            setAmountError('');
+        }
+    };
+
+    const handleReferenceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setReference(e.target.value);
+    }
+
+    const handleCurrencyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        setCurrency(e.target.value);
+        setPaymentCurrency(e.target.value); //Also, update the payment currency
+        if (e.target.value === 'VES') {
+            setExchangeRate('1'); // Reset exchange rate to 1 if VES is selected
+        }
     };
 
     return (
@@ -777,7 +881,9 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="bg-gray-50 p-3 rounded-lg mb-4">
                         <div className="text-gray-700">Total a pagar:</div>
-                        <div className="text-2xl font-bold text-gray-900">${total.toFixed(2)}</div>
+                        <div className="text-2xl font-bold text-gray-900">
+                            {currency === 'USD' ? `VES ${(total * parseFloat(exchangeRate)).toFixed(2)}` : `VES ${total.toFixed(2)}`}
+                        </div>
                     </div>
 
                     <div>
@@ -814,12 +920,23 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
                         <input
                             type="number"
                             id="amount"
-                            className="input"
+                            className={`input ${amountError ? 'border-error-500' : ''}`} // Apply a class for error styling
                             value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
+                            onChange={handleAmountChange}
                             min="0"
                             step="0.01"
                             required
+                        />
+                        {amountError && <p className="text-error-500 text-sm">{amountError}</p>}
+                    </div>
+                    <div>
+                        <label htmlFor="reference" className="label">Referencia</label>
+                        <input
+                            type="text"
+                            id="reference"
+                            className="input"
+                            value={reference}
+                            onChange={handleReferenceChange}
                         />
                     </div>
 
@@ -830,10 +947,10 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
                                 id="currency"
                                 className="input"
                                 value={currency}
-                                onChange={(e) => setCurrency(e.target.value)}
+                                onChange={handleCurrencyChange}
                             >
-                                <option value="USD">USD</option>
                                 <option value="VES">VES</option>
+                                <option value="USD">USD</option>
                             </select>
                         </div>
 
@@ -847,24 +964,14 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
                                 onChange={(e) => setExchangeRate(e.target.value)}
                                 min="0"
                                 step="0.01"
-                                required
+                                required={currency === 'USD'}
+                                disabled={currency === 'VES'}
                             />
                         </div>
                     </div>
 
                     {paymentMethod === 'transferencia' && (
                         <>
-                            <div>
-                                <label htmlFor="reference" className="label">Referencia</label>
-                                <input
-                                    type="text"
-                                    id="reference"
-                                    className="input"
-                                    value={reference}
-                                    onChange={(e) => setReference(e.target.value)}
-                                    required={paymentMethod === 'transferencia'}
-                                />
-                            </div>
 
                             <div>
                                 <label htmlFor="bank" className="label">Banco</label>
@@ -910,7 +1017,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
                         <button
                             type="submit"
                             className="btn btn-success flex items-center"
-                            disabled={loading}
+                            disabled={loading || amountError !== ''}
                         >
                             {loading ? (
                                 <LoadingSpinner size="sm" text="" />
@@ -923,6 +1030,54 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    );
+};
+
+// Component for Confirmation Modals
+interface ConfirmationModalProps {
+    message: string;
+    onConfirm: () => void;
+    onCancel: () => void;
+}
+
+const ConfirmationModal: React.FC<ConfirmationModalProps> = ({ message, onConfirm, onCancel }) => {
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
+                <div className="flex items-start">
+                    <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-warning-100 sm:mx-0 sm:h-10 sm:w-10">
+                        <AlertTriangle className="h-6 w-6 text-warning-600" aria-hidden="true" />
+                    </div>
+                    <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Confirmación
+                        </h3>
+                        <div className="mt-2">
+                            <p className="text-sm text-gray-500">
+                                {message}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex justify-end space-x-3 mt-6">
+                    <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={onCancel}
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={onConfirm}
+                    >
+                        Confirmar
+                    </button>
+                </div>
             </div>
         </div>
     );
