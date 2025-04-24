@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import {
@@ -10,11 +10,13 @@ import {
     Minus,
     CreditCard,
     DollarSign,
-    Receipt
+    Receipt,
+    Search as SearchIcon,
+    Info
 } from 'lucide-react';
 import { useCartStore, getCartTotals } from '../stores/cartStore';
 import { invoiceService } from '../services/api';
-import { InvoiceRequest, Document, Detail, Product, GetProductsResponse } from '../types/api'; // Import GetProductsResponse
+import { InvoiceRequest, Document, Detail, Product, GetProductsResponse, Client } from '../types/api';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 
@@ -31,9 +33,15 @@ const POS: React.FC = () => {
     const [products, setProducts] = useState<Product[]>([]);
     const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
-
+    const [customerSearchTerm, setCustomerSearchTerm] = useState(''); // Customer search term
+   // const [customers, setCustomers] = useState<Client[]>([]); // customers REMOVED
+    const [customerListLoading, setCustomerListLoading] = useState(false); // Loading for Customer List
     const [currentPage, setCurrentPage] = useState(1);
     const [itemsPerPage] = useState(12);
+    const [rifSearchModalOpen, setRifSearchModalOpen] = useState(false); // State for RIF search modal
+     const [rifSearchResult, setRifSearchResult] = useState<Client | null>(null); // State to store RIF search result
+    const [rifSearchLoading, setRifSearchLoading] = useState(false); // Loading state for RIF search
+    const [rifSearchTerm, setRifSearchTerm] = useState(''); //Local RIF search
 
     useEffect(() => {
         const fetchProducts = async () => {
@@ -74,9 +82,27 @@ const POS: React.FC = () => {
         fetchProducts();
     }, [user?.sucursal]);
 
+    const fetchCustomers = useCallback(async () => {
+        try {
+            setCustomerListLoading(true);  // Start loading for Customer List
+        } catch (error: any) {
+            console.error('Error fetching customers:', error);
+            toast.error(error.message || 'Error al cargar los clientes');
+        } finally {
+            setCustomerListLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        //fetchCustomers(); REMOVED: Unnecessary function
+    }, [fetchCustomers]);
+
     const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
         setSearchTerm(event.target.value.toLowerCase());
         setCurrentPage(1); // Reset to first page on search
+    };
+     const handleCustomerSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+        setCustomerSearchTerm(event.target.value.toLowerCase());
     };
 
     const handlePageClick = (pageNumber: number) => {
@@ -95,6 +121,86 @@ const POS: React.FC = () => {
     const indexOfFirstItem = indexOfLastItem - itemsPerPage;
     const currentItems = filteredProductsList.slice(indexOfFirstItem, indexOfLastItem);
     const totalPages = Math.ceil(filteredProductsList.length / itemsPerPage);
+
+        const handleSelectCustomer = (client: Client) => {
+        setCustomer({
+            razonSocial: client.razonSocial,
+            registroFiscal: client.registroFiscal,
+            direccionFiscal: client.direccionFiscal,
+            email: client.email,
+            telefono: client.telefono,
+            direccionEnvio: client.direccionEnvio,
+        });
+        setCustomerModalOpen(false);
+    };
+
+    const handleOpenRifSearchModal = () => {
+         console.log('handleOpenRifSearchModal');
+        setRifSearchModalOpen(true);
+        setRifSearchTerm(""); // Clear any previous search term
+         setRifSearchResult(null);
+    };
+
+    const handleCloseRifSearchModal = () => {
+        setRifSearchModalOpen(false);
+        setRifSearchResult(null); // Clear any previous search result
+    };
+
+    const handleSearchByRif = async () => {
+       console.log('handleSearchByRif');
+        try {
+            setRifSearchLoading(true);
+            const apiResponse = await invoiceService.getCustomersByRif(rifSearchTerm);
+
+            if (apiResponse && typeof apiResponse === 'object' && apiResponse !== null) {
+                if ((apiResponse as any).status === true) {
+                    const adaptedClient: Client = {
+                        id: (apiResponse as any).id || '',
+                        razonSocial: (apiResponse as any).razonSocial || '',
+                        registroFiscal: (apiResponse as any).registroFiscal || '',
+                        direccionFiscal: (apiResponse as any).direccionFiscal || '',
+                        email: (apiResponse as any).email || '',
+                        telefono: (apiResponse as any).telefono || '',
+                        direccionEnvio: (apiResponse as any).direccionEnvio || '',
+                        createdAt: (apiResponse as any).createdAt || '',
+                        totalCompras: parseFloat(((apiResponse as any).totalCompras ?? '0').toString()),
+                        ultimaCompra: (apiResponse as any).ultimaCompra || ''
+                    };
+                    setRifSearchResult(adaptedClient);
+
+                } else {
+                    toast.error((apiResponse as any)?.message || 'No se encontró ningún cliente con el RIF proporcionado.');
+                    setRifSearchResult(null);
+                }
+            } else {
+                toast.error('Error: Respuesta de la API inválida.');
+                setRifSearchResult(null);
+            }
+
+        } catch (error: any) {
+            console.error('Error fetching customer by RIF:', error);
+            toast.error(error.message || 'Error al buscar el cliente por RIF');
+            setRifSearchResult(null);
+        } finally {
+            setRifSearchLoading(false);
+        }
+    };
+
+    const handleSetCustomerFromRifSearch = () => {
+        if (rifSearchResult) {
+            setCustomer({
+                razonSocial: rifSearchResult.razonSocial,
+                registroFiscal: rifSearchResult.registroFiscal,
+                direccionFiscal: rifSearchResult.direccionFiscal,
+                email: rifSearchResult.email,
+                telefono: rifSearchResult.telefono,
+                direccionEnvio: rifSearchResult.direccionEnvio,
+            });
+            setRifSearchModalOpen(false);
+            setRifSearchResult(null);
+        }
+    };
+      
 
     const handleAddProduct = (product: Product) => {
         addItem({
@@ -138,7 +244,7 @@ const POS: React.FC = () => {
             const formattedDate = now.toISOString().split('T')[0] + ' ' +
                 now.toTimeString().split(' ')[0];
 
-            let invoiceNumber = '5';
+            let invoiceNumber = '1';
 
             const documento: Document = {
                 tipo_documento: 'FA',
@@ -371,13 +477,23 @@ const POS: React.FC = () => {
                         Carrito
                     </h2>
 
-                    <button
-                        onClick={() => setCustomerModalOpen(true)}
-                        className="btn btn-secondary btn-sm flex items-center"
-                    >
-                        <UserPlus className="h-4 w-4 mr-1" />
-                        Cliente
-                    </button>
+                    <div className="flex gap-2">
+                         <button
+                            onClick={() => handleOpenRifSearchModal()}
+                            className="btn btn-secondary btn-sm flex items-center"
+                         >
+                            <Info className="h-4 w-4 mr-1" />
+                            RIF
+                         </button>
+                       {/* <button
+                            onClick={() => handleOpenCustomerModal()}
+                            className="btn btn-secondary btn-sm flex items-center"
+                        >
+                            <UserPlus className="h-4 w-4 mr-1" />
+                            Cliente
+                        </button>  REMOVED BUTTON */}
+                    </div>
+
                 </div>
 
                 {/* Customer info */}
@@ -396,8 +512,7 @@ const POS: React.FC = () => {
                             <p>El carrito está vacío</p>
                         </div>
                     ) : (
-                        <div className="space-y-3">
-                            {items.map((item) => (
+                        <div className="space-y-3">{items.map((item) => (
                                 <div key={item.codigo} className="bg-white p-3 rounded shadow-sm">
                                     <div className="flex justify-between">
                                         <div className="flex-1">
@@ -494,62 +609,45 @@ const POS: React.FC = () => {
                 <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
                         <h3 className="text-xl font-bold mb-4">Información del cliente</h3>
-
-                        <form className="space-y-4">
-                            <div>
-                                <label htmlFor="razonSocial" className="label">Razón Social</label>
-                                <input
-                                    type="text"
-                                    id="razonSocial"
-                                    className="input"
-                                    value={customer.razonSocial}
-                                    onChange={(e) => setCustomer({ ...customer, razonSocial: e.target.value })}
-                                />
+                         <div className="relative mb-4">
+                            <input
+                                type="text"
+                                className="input pl-10 w-full"
+                                placeholder="Buscar cliente..."
+                                value={customerSearchTerm}
+                                onChange={handleCustomerSearch}
+                            />
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <SearchIcon className="h-5 w-5 text-gray-400"  viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"/>
                             </div>
-
-                            <div>
-                                <label htmlFor="registroFiscal" className="label">RIF/Cédula</label>
-                                <input
-                                    type="text"
-                                    id="registroFiscal"
-                                    className="input"
-                                    value={customer.registroFiscal}
-                                    onChange={(e) => setCustomer({ ...customer, registroFiscal: e.target.value })}
-                                />
-                            </div>
-
-                            <div>
-                                <label htmlFor="direccionFiscal" className="label">Dirección Fiscal</label>
-                                <input
-                                    type="text"
-                                    id="direccionFiscal"
-                                    className="input"
-                                    value={customer.direccionFiscal}
-                                    onChange={(e) => setCustomer({ ...customer, direccionFiscal: e.target.value })}
-                                />
-                            </div>
-
-                            <div>
-                                <label htmlFor="email" className="label">Correo Electrónico</label>
-                                <input
-                                    type="email"
-                                    id="email"
-                                    className="input"
-                                    value={customer.email}
-                                    onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
-                                />
-                            </div>
-
-                            <div>
-                                <label htmlFor="telefono" className="label">Teléfono</label>
-                                <input
-                                    type="text"
-                                    id="telefono"
-                                    className="input"
-                                    value={customer.telefono}
-                                    onChange={(e) => setCustomer({ ...customer, telefono: e.target.value })}
-                                />
-                            </div>
+                        </div>
+                      {/* <div className="h-40 overflow-y-auto">  REMOVED CUSTOMER LIST FUNCTIONALITY
+                            {loading ? (
+                                <div className="flex justify-center">
+                                    <LoadingSpinner size="sm" text="Cargando clientes..." />
+                                </div>
+                            ) :  (
+                                filteredCustomers.map(client => (
+                                    <div
+                                        key={client.id}
+                                        className="p-2 hover:bg-gray-100 cursor-pointer"
+                                        onClick={() => {
+                                            setCustomer({
+                                                razonSocial: client.razonSocial,
+                                                registroFiscal: client.registroFiscal,
+                                                direccionFiscal: client.direccionFiscal,
+                                                email: client.email,
+                                                telefono: client.telefono,
+                                                direccionEnvio: client.direccionEnvio,
+                                            });
+                                            setCustomerModalOpen(false);
+                                        }}
+                                    >
+                                        {client.razonSocial} ({client.registroFiscal})
+                                    </div>
+                                ))
+                            )}
+                    </div> */}
 
                             <div className="flex justify-end space-x-3 pt-4">
                                 <button
@@ -559,15 +657,8 @@ const POS: React.FC = () => {
                                 >
                                     Cancelar
                                 </button>
-                                <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    onClick={() => setCustomerModalOpen(false)}
-                                >
-                                    Guardar
-                                </button>
+                               
                             </div>
-                        </form>
                     </div>
                 </div>
             )}
@@ -580,6 +671,63 @@ const POS: React.FC = () => {
                     onComplete={handleCompleteSale}
                     loading={loading}
                 />
+            )}
+               {/* RIF Search Modal */}
+             {rifSearchModalOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
+                        <h3 className="text-xl font-bold mb-4">Buscar Cliente por RIF</h3>
+                        <div className="mb-4">
+                            <label htmlFor="rifSearch" className="label">
+                                Ingrese el RIF del cliente:
+                            </label>
+                            <input
+                                type="text"
+                                id="rifSearch"
+                                className="input"
+                                value={rifSearchTerm}
+                                onChange={(e) => setRifSearchTerm(e.target.value)}
+                                placeholder="Ej: J-12345678-9"
+                            />
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button type="button"
+                                className="btn btn-secondary"
+                                onClick={handleCloseRifSearchModal}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={handleSearchByRif}
+                                disabled={rifSearchLoading}
+                            >
+                                {rifSearchLoading ? (
+                                    <LoadingSpinner size="sm" text="" />
+                                ) : (
+                                    "Buscar"
+                                )}
+                            </button>
+                        </div>
+
+                        {rifSearchResult && (
+                            <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                                <h4 className="font-semibold">Cliente Encontrado:</h4>
+                                <p>Razón Social: {rifSearchResult.razonSocial}</p>
+                                <p>RIF: {rifSearchResult.registroFiscal}</p>
+                                <div className="mt-3">
+                                    <button
+                                        className="btn btn-success"
+                                        onClick={handleSetCustomerFromRifSearch}
+                                    >
+                                        Seleccionar Cliente
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     );
@@ -597,7 +745,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
     const [paymentMethod, setPaymentMethod] = useState('efectivo');
     const [amount, setAmount] = useState(total.toString());
     const [reference, setReference] = useState('');
-    const [bank, setBank] = useState('');
+    const [bank, setBank] = useState(' ');
     const [isPaid, setIsPaid] = useState(true);
     const [currency, setCurrency] = useState('USD');
     const [exchangeRate, setExchangeRate] = useState('1');
