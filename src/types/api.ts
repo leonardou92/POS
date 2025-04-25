@@ -11,10 +11,12 @@ export interface InvoiceResponse {
   message?: string; // Add the optional 'message' property
   documento: Document;
   detalles: Detail[];
+  saldo:number;
   // Other properties...
 }
 
 export interface Document {
+  id_documento:number;
   tipo_documento: DocumentType;
   numero_documento: number;
   numero_control: number;
@@ -50,6 +52,7 @@ export interface Document {
   status: DocumentStatus;
   tipo_documento_afectado?: string;
   numero_documento_afectado?: number;
+  saldo: number;
 }
 
 export interface Detail {

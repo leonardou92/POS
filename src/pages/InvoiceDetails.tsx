@@ -14,37 +14,38 @@ import {
   CreditCard,
   Receipt,
   AlertTriangle,
-  ExternalLink
+  ExternalLink,
+  DollarSign
 } from 'lucide-react';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import { invoiceService } from '../services/api';
-import { Document, Detail, Pago, InvoiceRequest } from '../types/api';
+import { Document, Detail, Pago, InvoiceRequest, PagoRequest } from '../types/api';
 
 interface AnularDocumentoRequest {
-    nro_control: number;
-    motivo_anulacion: string;
+  nro_control: number;
+  motivo_anulacion: string;
 }
 
 interface ApiResponse<T> {
   status: boolean;
   documento?: T;
-  detalles?: Detail[]; // Tipado específico
-  pagos?: Pago[];     // Tipado específico
+  detalles?: Detail[];
+  pagos?: Pago[];
   message?: string;
 }
 
 interface CancelInvoiceResponse {
-    status: boolean;
-    message?: string;
+  status: boolean;
+  message?: string;
 }
 
 interface CorrelativoResponse {
-    status: boolean;
-    id: string;
-    tipo_documento: string;
-    serie: string;
-    ultimo_numero: number;
-    message?: string;
+  status: boolean;
+  id: string;
+  tipo_documento: string;
+  serie: string;
+  ultimo_numero: number;
+  message?: string;
 }
 
 const InvoiceDetails: React.FC = () => {
@@ -58,20 +59,24 @@ const InvoiceDetails: React.FC = () => {
   const [payments, setPayments] = useState<Pago[]>([]);
   const [confirmModal, setConfirmModal] = useState<'anular' | 'eliminar' | null>(null);
   const [reason, setReason] = useState('');
-    const [generatingCreditNote, setGeneratingCreditNote] = useState(false); // Add loading state
+  const [generatingCreditNote, setGeneratingCreditNote] = useState(false);
+
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [paymentData, setPaymentData] = useState<PagoRequest | null>(null);
+  const [isPaying, setIsPaying] = useState(false);
 
   useEffect(() => {
     const fetchInvoiceDetails = async () => {
       try {
-        setLoading(true); // Start loading
+        setLoading(true);
 
         if (id) {
           const response: ApiResponse<Document> = await invoiceService.getInvoiceByControlNumber(id);
 
           if (response && response.status === true && response.documento) {
             setInvoice(response.documento);
-            setDetails(response.detalles || []); // Usar un array vacío si es undefined
-            setPayments(response.pagos || []);   // Usar un array vacío si es undefined
+            setDetails(response.detalles || []);
+            setPayments(response.pagos || []);
           } else {
             console.error('Error fetching invoice details:', response);
             toast.error(response?.message || 'Error al cargar los detalles de la factura');
@@ -93,7 +98,7 @@ const InvoiceDetails: React.FC = () => {
         setDetails([]);
         setPayments([]);
       } finally {
-        setLoading(false); // Stop loading
+        setLoading(false);
       }
     };
 
@@ -113,21 +118,20 @@ const InvoiceDetails: React.FC = () => {
 
       const response: CancelInvoiceResponse = await invoiceService.cancelInvoice(anularRequest);
 
-       if (response && response.status === true) {
-            // Update invoice status locally
-            setInvoice({
-                ...invoice,
-                status: 'ANULADO',
-                motivo_anulacion: reason,
-            });
+      if (response && response.status === true) {
+        setInvoice({
+          ...invoice,
+          status: 'ANULADO',
+          motivo_anulacion: reason,
+        });
 
-            setConfirmModal(null);
-            setReason('');
+        setConfirmModal(null);
+        setReason('');
 
-            toast.success('Factura anulada con éxito');
-        } else {
-            toast.error(response?.message || 'Error al anular la factura');
-        }
+        toast.success('Factura anulada con éxito');
+      } else {
+        toast.error(response?.message || 'Error al anular la factura');
+      }
 
 
     } catch (error: any) {
@@ -143,19 +147,9 @@ const InvoiceDetails: React.FC = () => {
 
     try {
       setLoading(true);
-
-      // In a real implementation, this would call the API
-      // await invoiceService.deleteInvoice({
-      //   nro_control: invoice.numero_control,
-      // });
-
-      // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1000));
-
       setConfirmModal(null);
       toast.success('Factura eliminada con éxito');
-
-      // Navigate back to invoices list
       navigate('/invoices');
     } catch (error: any) {
       console.error('Error eliminando factura:', error);
@@ -165,169 +159,271 @@ const InvoiceDetails: React.FC = () => {
     }
   };
 
-    const handleGenerateCreditNote = async () => {
-        if (!invoice) {
-            toast.error('No se puede generar la nota de crédito: factura no cargada.');
-            return;
-        }
+  const handleGenerateCreditNote = async () => {
+    if (!invoice) {
+      toast.error('No se puede generar la nota de crédito: factura no cargada.');
+      return;
+    }
 
-        let correlativoNC: CorrelativoResponse | null = null;
-        let correlativoCT: CorrelativoResponse | null = null;  // ADD CT
+    let correlativoNC: CorrelativoResponse | null = null;
+    let correlativoCT: CorrelativoResponse | null = null;
+    try {
+      setGeneratingCreditNote(true);
+
+      let response = await invoiceService.buscarCorrelativosPorTipo('NC');
+
+      if (response && response.status) {
+        correlativoNC = response;
+      } else {
+        console.error('Error fetching correlativo for NC:', response);
+        toast.error(response?.message || 'Error al obtener el correlativo para la nota de crédito');
+        return;
+      }
+
+      response = await invoiceService.buscarCorrelativosPorTipo('CT');
+
+      if (response && response.status) {
+        correlativoCT = response;
+      } else {
+        console.error('Error fetching correlativo for CT:', response);
+        toast.error(response?.message || 'Error al obtener el correlativo CT');
+        return;
+      }
+
+    } catch (error: any) {
+      console.error('Error fetching correlativo for NC/CT:', error);
+      toast.error(error.message || 'Error al obtener los correlativos');
+      return;
+    } finally {
+      setGeneratingCreditNote(false);
+    }
+
+    if (!correlativoNC || !correlativoCT) {
+      return;
+    }
+
+    try {
+      setGeneratingCreditNote(true);
+      const now = new Date();
+      const formattedDate = now.toISOString().split('T')[0] + ' ' + now.toTimeString().split(' ')[0];
+
+      const creditNoteNumber = correlativoNC.ultimo_numero;
+      const updatedNumber = creditNoteNumber;
+      const controlNumber = correlativoCT.ultimo_numero;
+      const updatedNumberCT = correlativoCT.ultimo_numero;
+
+      const documentoNC: Document = {
+        id_documento:0,
+        tipo_documento: 'NC',
+        numero_documento: creditNoteNumber,
+        numero_control: controlNumber,
+        fecha_emision: formattedDate,
+        razon_social: invoice.razon_social,
+        registro_fiscal: invoice.registro_fiscal,
+        direccion_fiscal: invoice.direccion_fiscal,
+        e_mail: invoice.e_mail,
+        telefono: invoice.telefono,
+        descripcion: `Nota de crédito para la factura ${invoice.numero_documento}`,
+        moneda_principal: invoice.moneda_principal,
+        balance_anterior: invoice.balance_anterior,
+        monto_exento: invoice.monto_exento,
+        base_imponible: invoice.base_imponible,
+        subtotal: invoice.subtotal,
+        monto_iva: invoice.monto_iva,
+        porcentaje_iva: invoice.porcentaje_iva,
+        base_reducido: invoice.base_reducido,
+        monto_iva_reducido: invoice.monto_iva_reducido,
+        porcentaje_iva_reducido: invoice.porcentaje_igtf,
+        total: invoice.total,
+        base_igtf: invoice.base_igtf,
+        monto_igtf: invoice.monto_igtf,
+        porcentaje_igtf: invoice.porcentaje_igtf,
+        total_general: invoice.total_general,
+        conversion_moneda: invoice.conversion_moneda,
+        tasa_cambio: invoice.tasa_cambio,
+        direccion_envio: invoice.direccion_envio,
+        serie_strong_id: `NC-` + Date.now().toString(),
+        serie: correlativoNC.serie,
+        usuario: user?.username || '',
+        status: 'PROCESADO',
+        motivo_anulacion: 'Nota de crédito generada automáticamente',
+        tipo_documento_afectado: invoice.tipo_documento,
+        numero_documento_afectado: invoice.numero_documento,
+        saldo: invoice.total,
+      };
+
+      const detallesNC: Detail[] = details.map(detail => ({
+        codigo: detail.codigo,
+        descripcion: detail.descripcion,
+        cantidad: detail.cantidad,
+        precio_unitario: detail.precio_unitario,
+        monto: detail.monto,
+        monto_total: detail.monto_total,
+        monto_iva: detail.monto_iva,
+        monto_descuento: detail.monto_descuento,
+        porcentaje_descuento: detail.porcentaje_iva,
+        porcentaje_iva: detail.porcentaje_iva,
+        es_exento: detail.es_exento,
+      }));
+
+      const invoiceRequestNC: InvoiceRequest = {
+        documento: documentoNC,
+        detalles: detallesNC,
+      };
+
+      const responseNC = await invoiceService.createInvoice(invoiceRequestNC);
+
+      if (responseNC && responseNC.status) {
         try {
-            setGeneratingCreditNote(true);
+          await invoiceService.updateCorrelativo(correlativoNC.tipo_documento, { ultimo_numero: Number(updatedNumber) + 1 });
+          toast.success(`Nota de crédito creada y correlativo NC actualizado a: ${Number(updatedNumber) + 1}`);
 
-            // Fetch correlativo for NC
-            let response = await invoiceService.buscarCorrelativosPorTipo('NC'); // Assuming 'NC' is the document type for credit notes
+          await invoiceService.updateCorrelativo(correlativoCT.tipo_documento, { ultimo_numero: Number(updatedNumberCT) + 1 });
+          toast.success(`Correlativo CT actualizado correctamente a: ${Number(updatedNumberCT) + 1}`);
 
-            if (response && response.status) {
-                correlativoNC = response;
-            } else {
-                console.error('Error fetching correlativo for NC:', response);
-                toast.error(response?.message || 'Error al obtener el correlativo para la nota de crédito');
-                return;
-            }
-
-            // FETCH CORRELATIVO CT FOR CONTROL NUMBER
-            response = await invoiceService.buscarCorrelativosPorTipo('CT'); // Assuming 'CT' is the document type for Control Number
-
-            if (response && response.status) {
-                correlativoCT = response;
-            } else {
-                console.error('Error fetching correlativo for CT:', response);
-                toast.error(response?.message || 'Error al obtener el correlativo CT');
-                return;
-            }
-
-        } catch (error: any) {
-            console.error('Error fetching correlativo for NC/CT:', error);
-            toast.error(error.message || 'Error al obtener los correlativos');
-            return;
-        } finally {
-            setGeneratingCreditNote(false);
+          navigate(`/invoices/${controlNumber}`);
+        } catch (updateError: any) {
+          console.error('Error updating correlativo after creating the credit note', updateError);
+          toast.error("Nota de crédito creada, pero hubo un error actualizando el número correlativo. Contacte al administrador");
         }
 
-        if (!correlativoNC || !correlativoCT) {
-            return;
-        }
+      } else {
+        console.error('Error creating credit note:', responseNC);
+        toast.error(responseNC?.message || 'Error al crear la nota de crédito');
+      }
 
-        try {
-            setGeneratingCreditNote(true);
-            const now = new Date();
-            const formattedDate = now.toISOString().split('T')[0] + ' ' + now.toTimeString().split(' ')[0];
+    } catch (error: any) {
+      console.error('Error al generar la nota de crédito:', error);
+      toast.error(error.message || 'Error al generar la nota de crédito');
+    } finally {
+      setGeneratingCreditNote(false);
+    }
+  };
 
-            const creditNoteNumber = correlativoNC.ultimo_numero;
-            const updatedNumber = creditNoteNumber;
-            // Usar el correlativo de CT
-            const controlNumber = correlativoCT.ultimo_numero;
-            const updatedNumberCT = correlativoCT.ultimo_numero;
+  const handleOpenPaymentModal = () => {
+    setPaymentModalOpen(true);
+  };
 
-            const documentoNC: Document = {
-                tipo_documento: 'NC',
-                numero_documento: creditNoteNumber,
-                numero_control: controlNumber, //USAR EL CORRELATIVO DE CT ACA
-                fecha_emision: formattedDate,
-                razon_social: invoice.razon_social,
-                registro_fiscal: invoice.registro_fiscal,
-                direccion_fiscal: invoice.direccion_fiscal,
-                e_mail: invoice.e_mail,
-                telefono: invoice.telefono,
-                descripcion: `Nota de crédito para la factura ${invoice.numero_documento}`,
-                moneda_principal: invoice.moneda_principal,
-                balance_anterior: invoice.balance_anterior,
-                monto_exento: invoice.monto_exento,
-                base_imponible: invoice.base_imponible,
-                subtotal: invoice.subtotal,
-                monto_iva: invoice.monto_iva,
-                porcentaje_iva: invoice.porcentaje_iva,
-                base_reducido: invoice.base_reducido,
-                monto_iva_reducido: invoice.monto_iva_reducido,
-                porcentaje_iva_reducido: invoice.porcentaje_iva_reducido,
-                total: invoice.total,
-                base_igtf: invoice.base_igtf,
-                monto_igtf: invoice.monto_igtf,
-                porcentaje_igtf: invoice.porcentaje_igtf,
-                total_general: invoice.total_general,
-                conversion_moneda: invoice.conversion_moneda,
-                tasa_cambio: invoice.tasa_cambio,
-                direccion_envio: invoice.direccion_envio,
-                serie_strong_id: `NC-` + Date.now().toString(),
-                serie: correlativoNC.serie,
-                usuario: user?.username || '',
-                status: 'PROCESADO',
-                motivo_anulacion: 'Nota de crédito generada automáticamente',
-                tipo_documento_afectado: invoice.tipo_documento,
-                numero_documento_afectado: invoice.numero_documento
-            };
+  const handleClosePaymentModal = () => {
+    setPaymentModalOpen(false);
+    setPaymentData(null);
+  };
 
-            const detallesNC: Detail[] = details.map(detail => ({
-                codigo: detail.codigo,
-                descripcion: detail.descripcion,
-                cantidad: detail.cantidad,
-                precio_unitario: detail.precio_unitario,
-                monto: detail.monto,
-                monto_total: detail.monto_total,
-                monto_iva: detail.monto_iva,
-                monto_descuento: detail.monto_descuento,
-                porcentaje_descuento: detail.porcentaje_iva,
-              porcentaje_iva: detail.porcentaje_iva,
-              es_exento: detail.es_exento,
-            }));
+  const handlePaymentSuccess = async (paymentInfo: any) => {
+    if (!invoice) {
+      toast.error('No se puede registrar el pago: factura no cargada.');
+      return;
+    }
 
-            const invoiceRequestNC: InvoiceRequest = {
-                documento: documentoNC,
-                detalles: detallesNC,
-            };
+    setIsPaying(true);
+    const paymentAmount = paymentInfo.amount && !isNaN(parseFloat(paymentInfo.amount)) ? parseFloat(paymentInfo.amount).toFixed(2) : '0.00';
 
-            const responseNC = await invoiceService.createInvoice(invoiceRequestNC);
+    let paymentReference = paymentInfo.reference;
+    let banco = paymentInfo.banco;
+    if (paymentInfo.metodoPago === 'efectivo') {
+      paymentReference = `Pago efectivo ${paymentInfo.currency} A factura: ${invoice.numero_control} fecha: ${paymentInfo.fecha_pago}`;
+      banco = `Efectivo ${paymentInfo.currency}`;
+    } else {
+      paymentReference = paymentInfo.reference; // Use reference from form for non-cash payments
+    }
 
-            if (responseNC && responseNC.status) {
-                try {
-                  // Update the FA number correlative:
-                  await invoiceService.updateCorrelativo(correlativoNC.tipo_documento, { ultimo_numero: Number(updatedNumber) + 1 });
-                  toast.success(`Nota de crédito creada y correlativo NC actualizado a: ${Number(updatedNumber) + 1}`);
-
-                  // Update correlativo CT for Control Number:
-                  await invoiceService.updateCorrelativo(correlativoCT.tipo_documento, { ultimo_numero: Number(updatedNumberCT) + 1 });
-                  toast.success(`Correlativo CT actualizado correctamente a: ${Number(updatedNumberCT) + 1}`);
-
-                      navigate(`/invoices/${controlNumber}`); // Navegar usando correlativo CT
-                } catch (updateError: any) {
-                    console.error('Error updating correlativo after creating the credit note', updateError);
-                    toast.error("Nota de crédito creada, pero hubo un error actualizando el número correlativo. Contacte al administrador");
-                }
-
-            } else {
-                console.error('Error creating credit note:', responseNC);
-                toast.error(responseNC?.message || 'Error al crear la nota de crédito');
-            }
-
-        } catch (error: any) {
-            console.error('Error al generar la nota de crédito:', error);
-            toast.error(error.message || 'Error al generar la nota de crédito');
-        } finally {
-            setGeneratingCreditNote(false);
-        }
+    const pagoRequest: PagoRequest = {
+      documento_afectado: invoice.numero_control,
+      desc_tipo_pago: paymentInfo.metodoPago,
+      monto: parseFloat(paymentAmount),
+      fecha_pago: paymentInfo.fecha_pago,
+      usuario: user?.username || 'usuario',
+      tasa_cambio: parseFloat(paymentInfo.exchangeRate),
+      moneda: paymentInfo.currency,
+      referencia: paymentReference,
+      banco: banco,
+      status: 'PROCESADO'
     };
 
-  // Format date for display
+    try {
+      const response = await invoiceService.registerPayment(pagoRequest);
+
+      if (response && response.status === true) {
+        toast.success('Pago registrado con éxito!');
+        setPaymentModalOpen(false);
+        const fetchInvoiceDetails = async () => {
+          try {
+            setLoading(true);
+            if (id) {
+              const response: ApiResponse<Document> = await invoiceService.getInvoiceByControlNumber(id);
+
+              if (response && response.status === true && response.documento) {
+                setInvoice(response.documento);
+                setDetails(response.detalles || []);
+                setPayments(response.pagos || []);
+              } else {
+                console.error('Error fetching invoice details:', response);
+                toast.error(response?.message || 'Error al cargar los detalles de la factura');
+                setInvoice(null);
+                setDetails([]);
+                setPayments([]);
+              }
+            } else {
+              console.warn('No invoice ID provided.');
+              toast.error('ID de factura no proporcionado.');
+              setInvoice(null);
+              setDetails([]);
+              setPayments([]);
+            }
+          } catch (error: any) {
+            console.error('Error fetching invoice details:', error);
+            toast.error(error?.message || 'Error al cargar los detalles de la factura');
+            setInvoice(null);
+            setDetails([]);
+            setPayments([]);
+          } finally {
+            setLoading(false);
+          }
+        };
+        await fetchInvoiceDetails();
+      } else {
+        toast.error(response?.message || 'No se pudo registrar el pago. Por favor, inténtelo de nuevo.');
+      }
+
+
+    } catch (error: any) {
+      console.error('Error al registrar el pago:', error);
+      toast.error(error.message || 'Error al registrar el pago');
+    } finally {
+      setIsPaying(false);
+      setPaymentModalOpen(false);
+      setPaymentData(null);
+    }
+  };
+
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return '';
     const date = new Date(dateString);
     return format(date, 'dd/MM/yyyy HH:mm');
   };
 
-  // Document type labels
   const documentTypeLabels: Record<string, string> = {
     FA: 'Factura',
     NC: 'Nota de Crédito',
     ND: 'Nota de Débito',
   };
 
-  // Helper function to format numbers with 2 decimal places
-    const formatCurrency = (amount: number | undefined): string => {
-        if (amount === undefined) return '0.00';
-        return Number(amount).toFixed(2);
-    };
+  const formatCurrency = (amount: number | undefined): string => {
+    if (amount === undefined) return '0.00';
+    return Number(amount).toFixed(2);
+  };
+
+  const getInvoiceStatusStyle = () => {
+    if (invoice && invoice.status === 'ANULADO') {
+      return 'bg-error-50 border-error-200 text-error-800';
+    } else if (invoice && invoice.saldo == 0.00) {
+      return 'bg-success-50 border-success-200 text-success-800';
+    } else if (invoice && invoice.saldo !== undefined && invoice.saldo < Number(invoice.total_general)) {
+      return 'bg-warning-50 border-warning-200 text-warning-800';
+    } else {
+      return 'bg-gray-50 border-gray-200 text-gray-800'; // or any other default style
+    }
+  };
 
 
   if (loading) {
@@ -364,27 +460,41 @@ const InvoiceDetails: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap mt-4 md:mt-0 space-x-0 space-y-2 sm:space-x-2 sm:space-y-0">
-           <button
+          {invoice.tipo_documento === 'FA' && invoice.status == 'PROCESADO'  && (
+            <>
+              <button
                 onClick={handleGenerateCreditNote}
                 className="btn btn-secondary w-full sm:w-auto flex items-center justify-center"
                 disabled={generatingCreditNote}
-            >
+              >
                 {generatingCreditNote ? (
-                    <LoadingSpinner size="sm" text="Generando..." />
+                  <LoadingSpinner size="sm" text="Generando..." />
                 ) : (
-                    <>
-                        <Receipt className="h-4 w-4 mr-1" />
-                        Generar Nota de Crédito
-                    </>
+                  <>
+                    <Receipt className="h-4 w-4 mr-1" />
+                    Generar Nota de Crédito
+                  </>
                 )}
-            </button>
+              </button>
+            </>
+          )}
           <button className="btn btn-secondary w-full sm:w-auto flex items-center justify-center">
             <Printer className="h-4 w-4 mr-1" />
             Imprimir
           </button>
 
-          {invoice.status === 'PROCESADO' && (
+          {invoice.status === 'PROCESADO' && invoice.tipo_documento == 'FA' && (
             <>
+             {invoice.saldo != 0.00 && (
+                <button
+                    onClick={handleOpenPaymentModal}
+                    className="btn btn-success w-full sm:w-auto flex items-center justify-center"
+                >
+                     <DollarSign className="h-4 w-4 mr-1" />
+                    Pagar Factura
+                </button>
+             )}
+              
               <button
                 onClick={() => setConfirmModal('anular')}
                 className="btn btn-secondary w-full sm:w-auto flex items-center justify-center"
@@ -393,44 +503,39 @@ const InvoiceDetails: React.FC = () => {
                 Anular
               </button>
 
-              <button
-                onClick={() => setConfirmModal('eliminar')}
-                className="btn btn-danger w-full sm:w-auto flex items-center justify-center"
-              >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Eliminar
-              </button>
+              
             </>
           )}
         </div>
       </div>
 
       {/* Invoice status */}
-      <div className={`mb-6 p-4 rounded-lg border ${
-        invoice.status === 'PROCESADO'
-          ? 'bg-success-50 border-success-200 text-success-800'
-          : 'bg-error-50 border-error-200 text-error-800'
-      }`}>
-        <div className="flex items-start">
-          <div className="flex-shrink-0">
-            {invoice.status === 'PROCESADO' ? (
-              <Receipt className="h-5 w-5" />
-            ) : (
-              <XCircle className="h-5 w-5" />
-            )}
-          </div>
-          <div className="ml-3">
-            <h3 className="text-sm font-medium">
-              {invoice.status === 'PROCESADO' ? 'Factura activa' : 'Factura anulada'}
-            </h3>
-            {invoice.status === 'ANULADO' && invoice.motivo_anulacion && (
-              <p className="mt-1 text-sm">
-                Motivo: {invoice.motivo_anulacion}
-              </p>
-            )}
-          </div>
+         <div className={`mb-6 p-4 rounded-lg border ${getInvoiceStatusStyle()}`}>
+            <div className="flex items-start">
+                <div className="flex-shrink-0">
+                    {invoice.status === 'ANULADO' ? (
+                        <XCircle className="h-5 w-5" />
+                    ) : invoice.saldo === 0 ? (
+                        <Receipt className="h-5 w-5" />
+                    ) : (invoice.saldo !== undefined && invoice.saldo < Number(invoice.total_general)) ? (
+                        <AlertTriangle className="h-5 w-5" />
+                    ) : (
+                        <XCircle className="h-5 w-5" />
+                    )}
+                </div>
+                <div className="ml-3">
+                    <h3 className="text-sm font-medium">
+                        {invoice.status === 'ANULADO' ? 'Factura anulada' :
+                            invoice.saldo == 0.00 ? 'Factura pagada' : (invoice.saldo > 0 && invoice.saldo < Number(invoice.total_general)) ? 'Factura parcialmente pagada' : 'Factura pendiente por pagar'}
+                    </h3>
+                    {invoice.status === 'ANULADO' && invoice.motivo_anulacion && (
+                        <p className="mt-1 text-sm">
+                            Motivo: {invoice.motivo_anulacion}
+                        </p>
+                    )}
+                </div>
+            </div>
         </div>
-      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Invoice details */}
@@ -555,69 +660,69 @@ const InvoiceDetails: React.FC = () => {
             </div>
           </div>
 
-          {/* Payments */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="px-4 py-5 sm:p-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-                <CreditCard className="h-5 w-5 mr-2 text-success-500" />
-                Pagos
-              </h3>
+            {/* Payments */}
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+                <div className="px-4 py-5 sm:p-6">
+                    <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                        <CreditCard className="h-5 w-5 mr-2 text-success-500" />
+                        Pagos
+                    </h3>
 
-              {payments.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Tipo
-                        </th>
-                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Referencia
-                        </th>
-                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Banco
-                        </th>
-                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Fecha
-                        </th>
-                        <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Monto
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {payments.map((payment, index) => (
-                        <tr key={index}>
-                          <td className="px-4 py-3 text-sm text-gray-900">
-                            {payment.desc_tipo_pago}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900">
-                            {payment.referencia}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900">
-                            {payment.banco}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-500">
-                            {formatDate(payment.fecha_pago)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
-                            VES {formatCurrency(payment.monto)}
-                            <div className="text-xs text-gray-500">
-                              {payment.moneda} (TC: {payment.tasa_cambio})
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                    {payments.length > 0 ? (
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Tipo
+                                        </th>
+                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Referencia
+                                        </th>
+                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Banco
+                                        </th>
+                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Fecha
+                                        </th>
+                                        <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Monto
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                    {payments.map((payment, index) => (
+                                        <tr key={index}>
+                                            <td className="px-4 py-3 text-sm text-gray-900">
+                                                {payment.desc_tipo_pago}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-900">
+                                                {payment.referencia}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-900">
+                                                {payment.banco}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-500">
+                                                {formatDate(payment.fecha_pago)}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                                                VES {formatCurrency(payment.monto)}
+                                                <div className="text-xs text-gray-500">
+                                                    {payment.moneda} (TC: {payment.tasa_cambio})
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="text-center py-6 text-gray-500">
+                            No hay pagos registrados
+                        </div>
+                    )}
                 </div>
-              ) : (
-                <div className="text-center py-6 text-gray-500">
-                  No hay pagos registrados
-                </div>
-              )}
             </div>
-          </div>
         </div>
 
         {/* Right column - Summary and customer info */}
@@ -625,6 +730,9 @@ const InvoiceDetails: React.FC = () => {
           {/* Summary */}
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <div className="px-4 py-5 sm:p-6">
+
+             
+
               <h3 className="text-lg font-medium text-gray-900 mb-4">Resumen</h3>
 
               <div className="space-y-3">
@@ -663,12 +771,19 @@ const InvoiceDetails: React.FC = () => {
                 )}
 
                 <div className="flex justify-between font-bold pt-3 border-t">
+                  <span>Pendiente:</span>
+                  <span>VES {formatCurrency(invoice.saldo)}</span>
+                </div>
+
+                <div className="flex justify-between font-bold pt-3 border-t">
                   <span>Total General:</span>
                   <span>VES {formatCurrency(invoice.total_general)}</span>
                 </div>
 
+
+
                 {invoice.conversion_moneda && (
-                  <div className="flex justify-between text-sm pt-2">
+                  <div className="flex justify-between font-bold pt-3 border-t">
                     <span className="text-gray-500">En {invoice.conversion_moneda}:</span>
                     <span className="text-gray-900">
                       {(Number(invoice.total_general) / Number(invoice.tasa_cambio)).toFixed(2)} {invoice.conversion_moneda}
@@ -677,19 +792,7 @@ const InvoiceDetails: React.FC = () => {
                 )}
               </div>
 
-              {/* Payment status */}
-              {payments.length > 0 && (
-                <div className="mt-4 pt-4 border-t">
-                  <div className="flex items-center text-success-600">
-                    <span className="bg-success-100 p-1 rounded-full mr-2">
-                      <svg className="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    </span>
-                    <span className="font-medium">Pagado</span>
-                  </div>
-                </div>
-              )}
+
             </div>
           </div>
 
@@ -710,16 +813,11 @@ const InvoiceDetails: React.FC = () => {
                 </div>
 
                 <div className="text-sm">
-                  <div className="text-gray-500">Email:</div>
-                  <div>{invoice.e_mail}</div>
-                </div>
-
-                <div className="text-sm">
-                  <div className="text-gray-500">Teléfono:</div>
+                <div className="text-gray-500">Teléfono:</div>
                   <div>{invoice.telefono}</div>
                 </div>
 
-                {invoice.direccion_envio && invoice.direccion_envio !== invoice.direccion_fiscal && (
+                {invoice.direccion_envio && invoice.direccion_envio !== invoice.direccion_fiscal &&  (
                   <div className="text-sm">
                     <div className="text-gray-500">Dirección de envío:</div>
                     <div>{invoice.direccion_envio}</div>
@@ -842,8 +940,282 @@ const InvoiceDetails: React.FC = () => {
           </div>
         </div>
       )}
+
+          {paymentModalOpen && invoice && (
+                <PaymentModal
+                    invoice={invoice}
+                    initialAmount={invoice.saldo || 0} // Pass the initial saldo value
+                    total={Number(invoice.total_general)}
+                    onClose={handleClosePaymentModal}
+                    onPaymentSuccess={handlePaymentSuccess}
+                    loading={isPaying}
+                />
+            )}
     </div>
   );
+};
+
+// Payment Modal Component
+interface PaymentModalProps {
+    invoice:Document,
+    total: number;
+    onClose: () => void;
+    onPaymentSuccess: (paymentInfo: any) => void;
+    loading: boolean;
+  initialAmount: number;
+}
+
+const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onPaymentSuccess, loading, invoice, initialAmount }) => {
+  const [paymentMethod, setPaymentMethod] = useState('efectivo');
+  const [amount, setAmount] = useState(String(initialAmount)); // Initialize as empty string
+    const [reference, setReference] = useState('');
+    const [bank, setBank] = useState(' ');
+    const [isPaid, setIsPaid] = useState(true);
+    const [currency, setCurrency] = useState('VES'); // Default to VES
+    const [exchangeRate, setExchangeRate] = useState('1');
+    const [paymentCurrency, setPaymentCurrency] = useState('VES');
+    const [amountError, setAmountError] = useState('');
+    const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+
+  useEffect(() => {
+        // Update amount when initialAmount changes to keep the value updated on VES, formatted to 2 decimal places
+        setAmount(String(initialAmount));
+  }, [initialAmount]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!amount) {
+            setAmountError('El monto es requerido');
+            return;
+        }
+
+         // Get the current time
+        const now = new Date();
+        const formattedTime = now.toTimeString().split(' ')[0]; // Get HH:mm:ss
+
+        // Combine selected date with current time
+        const formattedPaymentDate = `${paymentDate} ${formattedTime}`; //yyyy-MM-dd HH:mm:ss
+
+      const paymentInfo = {
+        metodoPago: paymentMethod,
+        amount: amount, // Use the formatted amount from state
+        referencia: reference,
+        banco: bank,
+        isPaid: true, // Mark as paid is always true, since now credit option is shown before calling to the Payment modal
+        currency: currency,
+        exchangeRate: parseFloat(exchangeRate),
+         paymentCurrency: paymentCurrency,
+        fecha_pago: formattedPaymentDate // Send combined date and time
+      };
+
+        onPaymentSuccess(paymentInfo);
+    };
+
+    const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setAmount(value);
+
+        if (!value) {
+            setAmountError('El monto es requerido');
+        } else if (isNaN(parseFloat(value))) {
+            setAmountError('El monto debe ser un número');
+        } else {
+            setAmountError('');
+        }
+    };
+
+    const handleReferenceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setReference(e.target.value);
+    }
+
+    const handleCurrencyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        setCurrency(e.target.value);
+        setPaymentCurrency(e.target.value); //Also, update the payment currency
+        if (e.target.value === 'VES') {
+            setExchangeRate('1'); // Reset exchange rate to 1 if VES is selected
+        }
+    };
+    const handlePaymentDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setPaymentDate(e.target.value);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
+                <h3 className="text-xl font-bold mb-4 flex items-center">
+                    <CreditCard className="h-5 w-5 mr-2" />
+                    Procesar pago
+                </h3>
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="bg-gray-50 p-3 rounded-lg mb-4">
+                        <div className="text-gray-700">Total a pagar:</div>
+                        <div className="text-2xl font-bold text-gray-900">
+                            {currency === 'USD' ? `VES ${(total * parseFloat(exchangeRate)).toFixed(2)}` : `VES ${total.toFixed(2)}`}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="label">Método de pago</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                type="button"
+                                className={`flex items-center justify-center p-3 rounded-lg border ${paymentMethod === 'efectivo'
+                                    ? 'bg-primary-50 border-primary-500 text-primary-700'
+                                    : 'border-gray-300 text-gray-700'
+                                    }`}
+                                onClick={() => setPaymentMethod('efectivo')}
+                            >
+                                <DollarSign className="h-5 w-5 mr-2" />
+                                Efectivo
+                            </button>
+
+                            <button
+                                type="button"
+                                className={`flex items-center justify-center p-3 rounded-lg border ${paymentMethod === 'transferencia'
+                                    ? 'bg-primary-50 border-primary-500 text-primary-700'
+                                    : 'border-gray-300 text-gray-700'
+                                    }`}
+                                onClick={() => setPaymentMethod('transferencia')}
+                            >
+                                <CreditCard className="h-5 w-5 mr-2" />
+                                Transferencia
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label htmlFor="amount" className="label">Monto recibido</label>
+                        <input
+                          type="number"
+                          id="amount"
+                          className={`input ${amountError ? 'border-error-500' : ''}`} // Apply a class for error styling
+                          value={amount}
+                          onChange={handleAmountChange}
+                          min="0"
+                          step="0.01"
+                          required
+                        />
+                        {amountError && <p className="text-error-500 text-sm">{amountError}</p>}
+                    </div>
+
+                    {paymentMethod !== 'efectivo' && (
+                      <div>
+                        <label htmlFor="reference" className="label">Referencia</label>
+                        <input
+                            type="text"
+                            id="reference"
+                            className="input"
+                            value={reference}
+                            onChange={handleReferenceChange}
+                        />
+                      </div>
+                    )}
+                         <div>
+                        <label htmlFor="paymentDate" className="label">Fecha de pago</label>
+                        <input
+                            type="date"
+                            id="paymentDate"
+                            className="input"
+                            value={paymentDate}
+                            onChange={handlePaymentDateChange}
+                            required
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label htmlFor="currency" className="label">Moneda</label>
+                            <select
+                                id="currency"
+                                className="input"
+                                value={currency}
+                                onChange={handleCurrencyChange}
+                            >
+                                <option value="VES">VES</option>
+                                <option value="USD">USD</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label htmlFor="exchangeRate" className="label">Tasa de cambio</label>
+                            <input
+                                type="number"
+                                id="exchangeRate"
+                                className="input"
+                                value={exchangeRate}
+                                onChange={(e) => setExchangeRate(e.target.value)}
+                                min="0"
+                                step="0.01"
+                                required={currency === 'USD'}
+                                disabled={currency === 'VES'}
+                            />
+                        </div>
+                    </div>
+
+                    {paymentMethod === 'transferencia' && (
+                        <>
+
+                            <div>
+                                <label htmlFor="bank" className="label">Banco</label>
+                                <select
+                                    id="bank"
+                                    className="input"
+                                    value={bank}
+                                    onChange={(e) => setBank(e.target.value)}
+                                    required={paymentMethod === 'transferencia'}
+                                >
+                                    <option value="">Seleccionar banco...</option>
+                                    <option value="Banesco">Banesco</option>
+                                    <option value="Provincial">Provincial</option>
+                                    <option value="Mercantil">Mercantil</option>
+                                    <option value="Venezuela">Venezuela</option>
+                                </select>
+                            </div>
+                        </>
+                    )}
+
+                    <div className="flex items-center mt-4">
+                        <input
+                            type="checkbox"
+                            id="isPaid"
+                            checked={isPaid}
+                            onChange={(e) => setIsPaid(e.target.checked)}
+                            className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <label htmlFor="isPaid" className="ml-2 block text-sm text-gray-900">
+                            Marcar como pagado
+                        </label>
+                    </div>
+
+                    <div className="flex justify-end space-x-3 pt-4">
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={onClose}
+                            disabled={loading}
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            className="btn btn-success flex items-center"
+                            disabled={loading || amountError !== ''}
+                        >
+                            {loading ? (
+                                <LoadingSpinner size="sm" text="" />
+                            ) : (
+                                <>
+                                    <Receipt className="h-4 w-4 mr-1" />
+                                    Completar pago
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
 };
 
 export default InvoiceDetails;

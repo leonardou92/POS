@@ -17,6 +17,7 @@ import LoadingSpinner from '../components/common/LoadingSpinner';
 import { invoiceService } from '../services/api';
 
 interface Document {  // Define the Document interface based on your actual API response
+    saldo: number;
     tipo_documento: string;
     numero_documento: string;
     numero_control: string;
@@ -285,6 +286,9 @@ const Invoices: React.FC = () => {
                       Total
                     </th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Saldo
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Estado
                     </th>
                     <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -331,7 +335,17 @@ const Invoices: React.FC = () => {
                             return `Invalid Value`;
                           }
                         })()}
-                      </td>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                         {(() => {
+                          const saldo = parseFloat(String(invoice.saldo || "0"));
+                          if (!isNaN(saldo)) {
+                            return `$${saldo.toFixed(2)}`;
+                          } else {
+                            return `Invalid Value`;
+                          }
+                        })()}
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             invoice.status === 'PROCESADO'

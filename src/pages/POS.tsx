@@ -348,6 +348,10 @@ const POS: React.FC = () => {
         }
     };
 
+    const handleRemoveItem = (id: string) => {
+        removeItem(id);
+    };
+
     const handleCompleteSale = async (paymentData: any, onCredit: boolean = false) => {
         if (items.length === 0) {
             toast.error('El carrito está vacío');
@@ -445,6 +449,7 @@ const POS: React.FC = () => {
             const igtfVES = paymentData?.paymentCurrency === 'USD' ? (totals.igtf * paymentData?.exchangeRate) : totals.igtf;
 
             const documento: Document = {
+                id_documento:0,
                 tipo_documento: 'FA',
                 numero_documento: invoiceNumber, // Convert invoice number to string
                 numero_control: controlNumber, // Convert control number to string
@@ -479,7 +484,8 @@ const POS: React.FC = () => {
                 status: 'PROCESADO', // Even for credit, set it to PROCESSED initially
                 motivo_anulacion: '',
                 tipo_documento_afectado: '',
-                numero_documento_afectado: undefined
+                numero_documento_afectado: undefined,
+                saldo: totals.grandTotal
             };
 
             const detalles: Detail[] = items.map((item) => {
@@ -553,7 +559,7 @@ const POS: React.FC = () => {
 
                         // Construct PagoRequest
                         const pagoRequest: PagoRequest = {
-                            documento_afectado: documento.numero_control,  // Or use the actual invoice number, if available
+                            documento_afectado: documento.numero_documento,  // Or use the actual invoice number, if available
                             desc_tipo_pago: paymentDescription,
                             monto: parseFloat(paymentAmount), // Convert paymentAmount to a number
                             fecha_pago: formattedDate,
@@ -719,7 +725,7 @@ const POS: React.FC = () => {
                                         >
                                             <span className="sr-only">Anterior</span>
                                             <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.44l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
                                             </svg>
                                         </button>
 
@@ -795,7 +801,7 @@ const POS: React.FC = () => {
                         </div>
                     ) : (
                         <div className="space-y-3">{items.map((item) => (
-                            <div key={item.codigo} className="bg-white p-3 rounded shadow-sm">
+                            <div key={item.id} className="bg-white p-3 rounded shadow-sm">
                                 <div className="flex justify-between">
                                     <div className="flex-1">
                                         <div className="font-medium">{item.descripcion}</div>
@@ -803,7 +809,7 @@ const POS: React.FC = () => {
                                     </div>
                                     <div className="flex items-center space-x-1">
                                         <button
-                                            onClick={() => removeItem(item.codigo)}
+                                            onClick={() => handleRemoveItem(item.id)}
                                             className="text-gray-400 hover:text-error-500"
                                         >
                                             <Trash2 className="h-4 w-4" />
@@ -814,14 +820,14 @@ const POS: React.FC = () => {
                                 <div className="mt-2 flex justify-between items-center">
                                     <div className="flex items-center border rounded">
                                         <button
-                                            onClick={() => updateQuantity(item.codigo, item.cantidad - 1)}
+                                            onClick={() => updateQuantity(item.id, item.cantidad - 1)}
                                             className="px-2 py-1 text-gray-500 hover:bg-gray-100"
                                         >
                                             <Minus className="h-3 w-3" />
                                         </button>
                                         <span className="px-2 py-1 text-center w-10">{item.cantidad}</span>
                                         <button
-                                            onClick={() => updateQuantity(item.codigo, item.cantidad + 1)}
+                                            onClick={() => updateQuantity(item.id, item.cantidad + 1)}
                                             className="px-2 py-1 text-gray-500 hover:bg-gray-100"
                                         >
                                             <Plus className="h-3 w-3" />
@@ -876,7 +882,7 @@ const POS: React.FC = () => {
                                 <CreditCard className="h-4 w-4 mr-1" />
                                 A Crédito
                             </button>
-
+                            
                             <button
                                 onClick={() => setPaymentModalOpen(true)}
                                 className="btn btn-primary flex-1 flex justify-center items-center"
