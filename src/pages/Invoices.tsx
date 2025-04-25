@@ -205,8 +205,8 @@ const Invoices: React.FC = () => {
               onChange={(e) => setSelectedStatus(e.target.value)}
             >
               <option value="all">Todos</option>
-              <option value="activo">Activas</option>
-              <option value="anulado">Anuladas</option>
+              <option value="PROCESADO">Activas</option>
+              <option value="ANULADO">Anuladas</option>
             </select>
           </div>
 
@@ -270,6 +270,9 @@ const Invoices: React.FC = () => {
                       Número
                     </th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Control
+                    </th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Fecha
                     </th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -306,6 +309,9 @@ const Invoices: React.FC = () => {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                           {invoice.numero_documento}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                          {invoice.numero_control}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                           {formatDate(invoice.fecha_emision)}

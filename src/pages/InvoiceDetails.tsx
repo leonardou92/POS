@@ -1,7 +1,10 @@
+// pages/InvoiceDetails.tsx
+
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
+import { useAuth } from '../hooks/useAuth';
 import {
   ArrowLeft,
   FileText,
@@ -15,7 +18,7 @@ import {
 } from 'lucide-react';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import { invoiceService } from '../services/api';
-import { Document, Detail, Pago } from '../types/api';
+import { Document, Detail, Pago, InvoiceRequest } from '../types/api';
 
 interface AnularDocumentoRequest {
     nro_control: number;
@@ -35,9 +38,18 @@ interface CancelInvoiceResponse {
     message?: string;
 }
 
+interface CorrelativoResponse {
+    status: boolean;
+    id: string;
+    tipo_documento: string;
+    serie: string;
+    ultimo_numero: number;
+    message?: string;
+}
 
 const InvoiceDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -46,6 +58,7 @@ const InvoiceDetails: React.FC = () => {
   const [payments, setPayments] = useState<Pago[]>([]);
   const [confirmModal, setConfirmModal] = useState<'anular' | 'eliminar' | null>(null);
   const [reason, setReason] = useState('');
+    const [generatingCreditNote, setGeneratingCreditNote] = useState(false); // Add loading state
 
   useEffect(() => {
     const fetchInvoiceDetails = async () => {
@@ -152,6 +165,150 @@ const InvoiceDetails: React.FC = () => {
     }
   };
 
+    const handleGenerateCreditNote = async () => {
+        if (!invoice) {
+            toast.error('No se puede generar la nota de crédito: factura no cargada.');
+            return;
+        }
+
+        let correlativoNC: CorrelativoResponse | null = null;
+        let correlativoCT: CorrelativoResponse | null = null;  // ADD CT
+        try {
+            setGeneratingCreditNote(true);
+
+            // Fetch correlativo for NC
+            let response = await invoiceService.buscarCorrelativosPorTipo('NC'); // Assuming 'NC' is the document type for credit notes
+
+            if (response && response.status) {
+                correlativoNC = response;
+            } else {
+                console.error('Error fetching correlativo for NC:', response);
+                toast.error(response?.message || 'Error al obtener el correlativo para la nota de crédito');
+                return;
+            }
+
+            // FETCH CORRELATIVO CT FOR CONTROL NUMBER
+            response = await invoiceService.buscarCorrelativosPorTipo('CT'); // Assuming 'CT' is the document type for Control Number
+
+            if (response && response.status) {
+                correlativoCT = response;
+            } else {
+                console.error('Error fetching correlativo for CT:', response);
+                toast.error(response?.message || 'Error al obtener el correlativo CT');
+                return;
+            }
+
+        } catch (error: any) {
+            console.error('Error fetching correlativo for NC/CT:', error);
+            toast.error(error.message || 'Error al obtener los correlativos');
+            return;
+        } finally {
+            setGeneratingCreditNote(false);
+        }
+
+        if (!correlativoNC || !correlativoCT) {
+            return;
+        }
+
+        try {
+            setGeneratingCreditNote(true);
+            const now = new Date();
+            const formattedDate = now.toISOString().split('T')[0] + ' ' + now.toTimeString().split(' ')[0];
+
+            const creditNoteNumber = correlativoNC.ultimo_numero;
+            const updatedNumber = creditNoteNumber;
+            // Usar el correlativo de CT
+            const controlNumber = correlativoCT.ultimo_numero;
+            const updatedNumberCT = correlativoCT.ultimo_numero;
+
+            const documentoNC: Document = {
+                tipo_documento: 'NC',
+                numero_documento: creditNoteNumber,
+                numero_control: controlNumber, //USAR EL CORRELATIVO DE CT ACA
+                fecha_emision: formattedDate,
+                razon_social: invoice.razon_social,
+                registro_fiscal: invoice.registro_fiscal,
+                direccion_fiscal: invoice.direccion_fiscal,
+                e_mail: invoice.e_mail,
+                telefono: invoice.telefono,
+                descripcion: `Nota de crédito para la factura ${invoice.numero_documento}`,
+                moneda_principal: invoice.moneda_principal,
+                balance_anterior: invoice.balance_anterior,
+                monto_exento: invoice.monto_exento,
+                base_imponible: invoice.base_imponible,
+                subtotal: invoice.subtotal,
+                monto_iva: invoice.monto_iva,
+                porcentaje_iva: invoice.porcentaje_iva,
+                base_reducido: invoice.base_reducido,
+                monto_iva_reducido: invoice.monto_iva_reducido,
+                porcentaje_iva_reducido: invoice.porcentaje_iva_reducido,
+                total: invoice.total,
+                base_igtf: invoice.base_igtf,
+                monto_igtf: invoice.monto_igtf,
+                porcentaje_igtf: invoice.porcentaje_igtf,
+                total_general: invoice.total_general,
+                conversion_moneda: invoice.conversion_moneda,
+                tasa_cambio: invoice.tasa_cambio,
+                direccion_envio: invoice.direccion_envio,
+                serie_strong_id: `NC-` + Date.now().toString(),
+                serie: correlativoNC.serie,
+                usuario: user?.username || '',
+                status: 'PROCESADO',
+                motivo_anulacion: 'Nota de crédito generada automáticamente',
+                tipo_documento_afectado: invoice.tipo_documento,
+                numero_documento_afectado: invoice.numero_documento
+            };
+
+            const detallesNC: Detail[] = details.map(detail => ({
+                codigo: detail.codigo,
+                descripcion: detail.descripcion,
+                cantidad: detail.cantidad,
+                precio_unitario: detail.precio_unitario,
+                monto: detail.monto,
+                monto_total: detail.monto_total,
+                monto_iva: detail.monto_iva,
+                monto_descuento: detail.monto_descuento,
+                porcentaje_descuento: detail.porcentaje_iva,
+              porcentaje_iva: detail.porcentaje_iva,
+              es_exento: detail.es_exento,
+            }));
+
+            const invoiceRequestNC: InvoiceRequest = {
+                documento: documentoNC,
+                detalles: detallesNC,
+            };
+
+            const responseNC = await invoiceService.createInvoice(invoiceRequestNC);
+
+            if (responseNC && responseNC.status) {
+                try {
+                  // Update the FA number correlative:
+                  await invoiceService.updateCorrelativo(correlativoNC.tipo_documento, { ultimo_numero: Number(updatedNumber) + 1 });
+                  toast.success(`Nota de crédito creada y correlativo NC actualizado a: ${Number(updatedNumber) + 1}`);
+
+                  // Update correlativo CT for Control Number:
+                  await invoiceService.updateCorrelativo(correlativoCT.tipo_documento, { ultimo_numero: Number(updatedNumberCT) + 1 });
+                  toast.success(`Correlativo CT actualizado correctamente a: ${Number(updatedNumberCT) + 1}`);
+
+                      navigate(`/invoices/${controlNumber}`); // Navegar usando correlativo CT
+                } catch (updateError: any) {
+                    console.error('Error updating correlativo after creating the credit note', updateError);
+                    toast.error("Nota de crédito creada, pero hubo un error actualizando el número correlativo. Contacte al administrador");
+                }
+
+            } else {
+                console.error('Error creating credit note:', responseNC);
+                toast.error(responseNC?.message || 'Error al crear la nota de crédito');
+            }
+
+        } catch (error: any) {
+            console.error('Error al generar la nota de crédito:', error);
+            toast.error(error.message || 'Error al generar la nota de crédito');
+        } finally {
+            setGeneratingCreditNote(false);
+        }
+    };
+
   // Format date for display
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return '';
@@ -207,6 +364,20 @@ const InvoiceDetails: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap mt-4 md:mt-0 space-x-0 space-y-2 sm:space-x-2 sm:space-y-0">
+           <button
+                onClick={handleGenerateCreditNote}
+                className="btn btn-secondary w-full sm:w-auto flex items-center justify-center"
+                disabled={generatingCreditNote}
+            >
+                {generatingCreditNote ? (
+                    <LoadingSpinner size="sm" text="Generando..." />
+                ) : (
+                    <>
+                        <Receipt className="h-4 w-4 mr-1" />
+                        Generar Nota de Crédito
+                    </>
+                )}
+            </button>
           <button className="btn btn-secondary w-full sm:w-auto flex items-center justify-center">
             <Printer className="h-4 w-4 mr-1" />
             Imprimir
@@ -603,7 +774,7 @@ const InvoiceDetails: React.FC = () => {
               <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
                 <button
                   type="button"
-                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-warning-600 text-base font-medium text-white hover:bg-warning-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-warning-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  className="w-full inline-flex justify-center rounded-md  border border-transparent shadow-sm px-4 py-2 bg-warning-600 text-base font-medium text-white hover:bg-warning-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-warning-500 sm:ml-3 sm:w-auto sm:text-sm"
                   onClick={handleCancelInvoice}
                   disabled={!reason}
                 >

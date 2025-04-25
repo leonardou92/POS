@@ -103,6 +103,10 @@ const POS: React.FC = () => {
     const [correlativoLoading, setCorrelativoLoading] = useState(false);
     const [noCorrelativoAlert, setNoCorrelativoAlert] = useState(false); // State for no correlativo alert
 
+    const [correlativoCT, setCorrelativoCT] = useState<CorrelativoResponse | null>(null);
+    const [correlativoCTLoading, setCorrelativoCTLoading] = useState(false);
+    const [noCorrelativoCTAlert, setNoCorrelativoCTAlert] = useState(false);
+
     useEffect(() => {
         const fetchProducts = async () => {
             try {
@@ -141,6 +145,34 @@ const POS: React.FC = () => {
 
         fetchProducts();
     }, [user?.sucursal]);
+
+    const fetchCorrelativoCT = async () => {
+        try {
+            setCorrelativoCTLoading(true);
+            const response = await invoiceService.buscarCorrelativosPorTipo('CT'); // Assuming 'CT' is the document type for Control Number
+
+            if (response && response.status) {
+                setCorrelativoCT(response);
+                setNoCorrelativoCTAlert(false);
+            } else {
+                console.error('Error fetching correlativo CT:', response);
+                toast.error(response?.message || 'Error al obtener el correlativo CT');
+                setCorrelativoCT(null);
+                setNoCorrelativoCTAlert(true);
+            }
+        } catch (error: any) {
+            console.error('Error fetching correlativo CT:', error);
+            toast.error(error.message || 'Error al obtener el correlativo CT');
+            setCorrelativoCT(null);
+            setNoCorrelativoCTAlert(true);
+        } finally {
+            setCorrelativoCTLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchCorrelativoCT();
+    }, []);
 
     /*
     useEffect(() => {
@@ -360,6 +392,35 @@ const POS: React.FC = () => {
             return;
         }
 
+        // ************************* FETCH THE CORRELATIVO CT HERE ******************************
+        let correlativoCT: CorrelativoResponse | null = null;
+        try {
+            setCorrelativoCTLoading(true);
+            const response = await invoiceService.buscarCorrelativosPorTipo('CT');
+
+            if (response && response.status) {
+                correlativoCT = response;
+                setNoCorrelativoCTAlert(false);
+            } else {
+                console.error('Error fetching correlativo CT:', response);
+                toast.error(response?.message || 'Error al obtener el correlativo CT');
+                correlativoCT = null;
+                setNoCorrelativoCTAlert(true);
+            }
+        } catch (error: any) {
+            console.error('Error fetching correlativo CT:', error);
+            toast.error(error.message || 'Error al obtener el correlativo CT');
+            correlativoCT = null;
+            setNoCorrelativoCTAlert(true);
+        } finally {
+            setCorrelativoCTLoading(false);
+        }
+
+        if (!correlativoCT) {
+            return;
+        }
+
+
         try {
             setLoading(true);
 
@@ -369,9 +430,11 @@ const POS: React.FC = () => {
 
             // Use the correlativo number before incrementing it
             const invoiceNumber = Number(correlativo.ultimo_numero);
-            const controlNumber = Number(invoiceNumber); //SAME VALUE
+            // const controlNumber = Number(invoiceNumber); //SAME VALUE
+            const controlNumber = Number(correlativoCT.ultimo_numero); // Usar el correlativo de CT
             // const updatedNumber = invoiceNumber + 1;
             const updatedNumber = Number(invoiceNumber); // Ensure it's treated as a number
+            const updatedNumberCT = Number(controlNumber);
 
             // Calculate totals in VES based on currency and exchange rate
             const totalGeneralVES = paymentData?.paymentCurrency === 'USD' ? (totals.grandTotal * paymentData?.exchangeRate) : totals.grandTotal;
@@ -384,7 +447,7 @@ const POS: React.FC = () => {
             const documento: Document = {
                 tipo_documento: 'FA',
                 numero_documento: invoiceNumber, // Convert invoice number to string
-                numero_control: invoiceNumber, // Convert control number to string
+                numero_control: controlNumber, // Convert control number to string
                 fecha_emision: formattedDate,
                 razon_social: customer.razonSocial,
                 registro_fiscal: customer.registroFiscal,
@@ -454,13 +517,25 @@ const POS: React.FC = () => {
                     if (correlativo) {
                         try {
                             await invoiceService.updateCorrelativo(correlativo.tipo_documento, { ultimo_numero: updatedNumber + 1 });
-                            toast.success(`Correlativo actualizado correctamente a: ${updatedNumber + 1}`);
+                            toast.success(`Correlativo FA actualizado correctamente a: ${updatedNumber + 1}`);
 
                         } catch (updateError: any) {
                             console.error('Error updating correlativo after creating the invoice', updateError);
-                            toast.error("Factura creada, pero hubo un error actualizando el número correlativo. Contacte al administrador");
+                            toast.error("Factura creada, pero hubo un error actualizando el número correlativo FA. Contacte al administrador");
                         }
                     }
+
+                    // Update correlativo CT
+                    if (correlativoCT) {
+                        try {
+                            await invoiceService.updateCorrelativo(correlativoCT.tipo_documento, { ultimo_numero: updatedNumberCT + 1 });
+                            toast.success(`Correlativo CT actualizado correctamente a: ${updatedNumberCT + 1}`);
+                        } catch (updateError: any) {
+                            console.error('Error updating correlativo CT after creating the invoice', updateError);
+                            toast.error("Factura creada, pero hubo un error actualizando el número correlativo CT. Contacte al administrador");
+                        }
+                    }
+
                     if (!onCredit && paymentData && paymentData.isPaid) {
                         // Determine correct payment description based on currency
                         const paymentDescription = paymentData.currency === 'VES' ? 'Transferencia Bs' : 'Transferencia USD';
@@ -658,7 +733,6 @@ const POS: React.FC = () => {
                                                 {index + 1}
                                             </button>
                                         ))}
-
                                         <button
                                             onClick={() => handlePageClick(Math.min(totalPages, currentPage + 1))}
                                             disabled={currentPage === totalPages}
@@ -694,12 +768,12 @@ const POS: React.FC = () => {
                             RIF
                         </button>
                         {/* <button
-                            onClick={() => handleOpenCustomerModal()}
-                            className="btn btn-secondary btn-sm flex items-center"
-                        >
-                            <UserPlus className="h-4 w-4 mr-1" />
-                            Cliente
-                        </button>  REMOVED BUTTON */}
+                        onClick={() => handleOpenCustomerModal()}
+                        className="btn btn-secondary btn-sm flex items-center"
+                    >
+                        <UserPlus className="h-4 w-4 mr-1" />
+                        Cliente
+                    </button>  REMOVED BUTTON */}
                     </div>
 
                 </div>
@@ -714,7 +788,7 @@ const POS: React.FC = () => {
 
                 {/* Cart items */}
                 <div className="flex-1 overflow-y-auto">
-                    {items.length ===  0 ? (
+                    {items.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text items-center justify-center text-gray-500">
                             <Package className="h-12 w-12 mb-2" />
                             <p>El carrito está vacío</p>
@@ -791,13 +865,13 @@ const POS: React.FC = () => {
                     </div>
 
                     {/* Conditionally render payment buttons */}
-                    {showPaymentButtons && !noCorrelativoAlert && !correlativoLoading && (
+                    {showPaymentButtons && !noCorrelativoAlert && !correlativoLoading && !noCorrelativoCTAlert && !correlativoCTLoading && (
                         <div className="mt-4 flex flex-col space-y-2">
                             {/* Display "Process on Credit" button only if it's enabled in backend */}
                             <button
                                 onClick={() => setShowCreditOption(true)}
                                 className="btn btn-secondary flex-1 flex justify-center items-center"
-                                disabled={correlativoLoading || noCorrelativoAlert}
+                                disabled={correlativoLoading || noCorrelativoAlert || correlativoCTLoading || noCorrelativoCTAlert}
                             >
                                 <CreditCard className="h-4 w-4 mr-1" />
                                 A Crédito
@@ -806,7 +880,7 @@ const POS: React.FC = () => {
                             <button
                                 onClick={() => setPaymentModalOpen(true)}
                                 className="btn btn-primary flex-1 flex justify-center items-center"
-                                disabled={correlativoLoading || noCorrelativoAlert}
+                                disabled={correlativoLoading || noCorrelativoAlert || correlativoCTLoading || noCorrelativoCTAlert}
                             >
                                 <CreditCard className="h-4 w-4 mr-1" />
                                 Pagar
@@ -921,7 +995,7 @@ const POS: React.FC = () => {
             {/* Correlativo Loading Overlay */}
             {correlativoLoading && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <LoadingSpinner text="Cargando correlativo..." />
+                    <LoadingSpinner text="Cargando correlativo FA..." />
                 </div>
             )}
 
@@ -939,7 +1013,7 @@ const POS: React.FC = () => {
                                 </h3>
                                 <div className="mt-2">
                                     <p className="text-sm text-gray-500">
-                                        No se encontró información del correlativo.  Por favor, contacte al administrador.
+                                        No se encontró información del correlativo FA.  Por favor, contacte al administrador.
                                     </p>
                                 </div>
                             </div>
@@ -949,6 +1023,45 @@ const POS: React.FC = () => {
                                 type="button"
                                 className="btn btn-secondary"
                                 onClick={() => setNoCorrelativoAlert(false)}
+                            >
+                                Aceptar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Correlativo CT Loading Overlay */}
+            {correlativoCTLoading && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <LoadingSpinner text="Cargando correlativo CT..." />
+                </div>
+            )}
+
+            {/* No Correlativo CT Alert */}
+            {noCorrelativoCTAlert && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
+                        <div className="flex items-start">
+                            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-error-100 sm:mx-0 sm:h-10 sm:w-10">
+                                <AlertTriangle className="h-6 w-6 text-error-600" aria-hidden="true" />
+                            </div>
+                            <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                                <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                                    Error
+                                </h3>
+                                <div className="mt-2">
+                                    <p className="text-sm text-gray-500">
+                                        No se encontró información del correlativo CT.  Por favor, contacte al administrador.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end space-x-3 mt-6">
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => setNoCorrelativoCTAlert(false)}
                             >
                                 Aceptar
                             </button>
@@ -982,7 +1095,6 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
         // Update amount when total changes to keep the value updated on VES, formatted to 2 decimal places
         setAmount(total.toFixed(2));
     }, [total]);
-
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!amount) {

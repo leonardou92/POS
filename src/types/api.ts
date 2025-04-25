@@ -7,6 +7,10 @@ export interface InvoiceResponse {
   total_general: number;
   razon_social: string;
   numero_documento: number; // Added the missing property
+  status: boolean;
+  message?: string; // Add the optional 'message' property
+  documento: Document;
+  detalles: Detail[];
   // Other properties...
 }
 
@@ -67,11 +71,6 @@ export interface InvoiceRequest {
   detalles: Detail[];
 }
 
-export interface InvoiceResponse {
-  status: boolean;
-  documento: Document;
-  detalles: Detail[];
-}
 
 export interface Pago {
   documento_afectado: number;
