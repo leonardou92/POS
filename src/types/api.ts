@@ -6,14 +6,14 @@ export interface InvoiceResponse {
   fecha_emision: string;
   total_general: number;
   razon_social: string;
-  numero_documento: string; // Added the missing property
+  numero_documento: number; // Added the missing property
   // Other properties...
 }
 
 export interface Document {
   tipo_documento: DocumentType;
-  numero_documento: string;
-  numero_control: string;
+  numero_documento: number;
+  numero_control: number;
   fecha_emision: string;
   razon_social: string;
   registro_fiscal: string;
@@ -45,7 +45,7 @@ export interface Document {
   motivo_anulacion?: string;
   status: DocumentStatus;
   tipo_documento_afectado?: string;
-  numero_documento_afectado?: string;
+  numero_documento_afectado?: number;
 }
 
 export interface Detail {
@@ -74,7 +74,7 @@ export interface InvoiceResponse {
 }
 
 export interface Pago {
-  documento_afectado: string;
+  documento_afectado: number;
   desc_tipo_pago: string;
   monto: number;
   fecha_pago: string;
@@ -87,7 +87,7 @@ export interface Pago {
 }
 
 export interface PagoRequest {
-  documento_afectado: string;
+  documento_afectado: number;
   desc_tipo_pago: string;
   monto: number;
   fecha_pago: string;
@@ -106,12 +106,12 @@ export interface ApiError {
 }
 
 export interface AnularDocumentoRequest {
-  nro_control: string;
+  nro_control: number;
   motivo_anulacion: string;
 }
 
 export interface EliminarDocumentoRequest {
-  nro_control: string;
+  nro_control: number;
 }
 
 // types/api.ts

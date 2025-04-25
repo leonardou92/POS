@@ -18,7 +18,7 @@ import { invoiceService } from '../services/api';
 import { Document, Detail, Pago } from '../types/api';
 
 interface AnularDocumentoRequest {
-    nro_control: string;
+    nro_control: number;
     motivo_anulacion: string;
 }
 
