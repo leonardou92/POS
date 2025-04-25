@@ -323,12 +323,10 @@ const InvoiceDetails: React.FC = () => {
     if (paymentInfo.metodoPago === 'efectivo') {
       paymentReference = `Pago efectivo ${paymentInfo.currency} A factura: ${invoice.numero_control} fecha: ${paymentInfo.fecha_pago}`;
       banco = `Efectivo ${paymentInfo.currency}`;
-    } else {
-      paymentReference = paymentInfo.reference; // Use reference from form for non-cash payments
     }
 
     const pagoRequest: PagoRequest = {
-      documento_afectado: invoice.numero_control,
+      documento_afectado: invoice.numero_documento,
       desc_tipo_pago: paymentInfo.metodoPago,
       monto: parseFloat(paymentAmount),
       fecha_pago: paymentInfo.fecha_pago,
@@ -1099,8 +1097,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onPaymentSu
                         {amountError && <p className="text-error-500 text-sm">{amountError}</p>}
                     </div>
 
-                    {paymentMethod !== 'efectivo' && (
-                      <div>
+                    <div>
                         <label htmlFor="reference" className="label">Referencia</label>
                         <input
                             type="text"
@@ -1109,8 +1106,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onPaymentSu
                             value={reference}
                             onChange={handleReferenceChange}
                         />
-                      </div>
-                    )}
+                    </div>
                          <div>
                         <label htmlFor="paymentDate" className="label">Fecha de pago</label>
                         <input
