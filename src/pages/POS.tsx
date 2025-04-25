@@ -368,9 +368,10 @@ const POS: React.FC = () => {
                 now.toTimeString().split(' ')[0];
 
             // Use the correlativo number before incrementing it
-            const invoiceNumber = correlativo.ultimo_numero;
-            const controlNumber = invoiceNumber; //SAME VALUE
-            const updatedNumber = invoiceNumber + 1;
+            const invoiceNumber = Number(correlativo.ultimo_numero);
+            const controlNumber = Number(invoiceNumber); //SAME VALUE
+            // const updatedNumber = invoiceNumber + 1;
+            const updatedNumber = Number(invoiceNumber); // Ensure it's treated as a number
 
             // Calculate totals in VES based on currency and exchange rate
             const totalGeneralVES = paymentData?.paymentCurrency === 'USD' ? (totals.grandTotal * paymentData?.exchangeRate) : totals.grandTotal;
@@ -382,8 +383,8 @@ const POS: React.FC = () => {
 
             const documento: Document = {
                 tipo_documento: 'FA',
-                numero_documento: invoiceNumber.toString(), // Convert invoice number to string
-                numero_control: controlNumber.toString(), // Convert control number to string
+                numero_documento: invoiceNumber, // Convert invoice number to string
+                numero_control: invoiceNumber, // Convert control number to string
                 fecha_emision: formattedDate,
                 razon_social: customer.razonSocial,
                 registro_fiscal: customer.registroFiscal,
@@ -415,7 +416,7 @@ const POS: React.FC = () => {
                 status: 'PROCESADO', // Even for credit, set it to PROCESSED initially
                 motivo_anulacion: '',
                 tipo_documento_afectado: '',
-                numero_documento_afectado: ''
+                numero_documento_afectado: undefined
             };
 
             const detalles: Detail[] = items.map((item) => {
@@ -452,8 +453,8 @@ const POS: React.FC = () => {
                     // Now, after the invoice is successfully created, update the correlative:
                     if (correlativo) {
                         try {
-                            await invoiceService.updateCorrelativo(correlativo.tipo_documento, { ultimo_numero: updatedNumber });
-                            toast.success(`Correlativo actualizado correctamente a: ${updatedNumber}`);
+                            await invoiceService.updateCorrelativo(correlativo.tipo_documento, { ultimo_numero: updatedNumber + 1 });
+                            toast.success(`Correlativo actualizado correctamente a: ${updatedNumber + 1}`);
 
                         } catch (updateError: any) {
                             console.error('Error updating correlativo after creating the invoice', updateError);
@@ -713,7 +714,7 @@ const POS: React.FC = () => {
 
                 {/* Cart items */}
                 <div className="flex-1 overflow-y-auto">
-                    {items.length === 0 ? (
+                    {items.length ===  0 ? (
                         <div className="h-full flex flex-col items-center justify-center text items-center justify-center text-gray-500">
                             <Package className="h-12 w-12 mb-2" />
                             <p>El carrito está vacío</p>
