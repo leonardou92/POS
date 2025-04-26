@@ -1,6 +1,4 @@
-// pages/InvoiceDetails.tsx
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';
@@ -14,7 +12,6 @@ import {
   CreditCard,
   Receipt,
   AlertTriangle,
-  ExternalLink,
   DollarSign
 } from 'lucide-react';
 import LoadingSpinner from '../components/common/LoadingSpinner';
@@ -24,6 +21,7 @@ import { Document, Detail, Pago, InvoiceRequest, PagoRequest } from '../types/ap
 interface AnularDocumentoRequest {
   nro_control: number;
   motivo_anulacion: string;
+  tipo_documento: string;
 }
 
 interface ApiResponse<T> {
@@ -44,12 +42,13 @@ interface CorrelativoResponse {
   id: string;
   tipo_documento: string;
   serie: string;
-  ultimo_numero: number;
+  ultimo_documento: number;
+  ultimo_control: number;
   message?: string;
 }
 
 const InvoiceDetails: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { id, tipo_documento } = useParams<{ tipo_documento: string; id: string; }>();
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -64,14 +63,16 @@ const InvoiceDetails: React.FC = () => {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentData, setPaymentData] = useState<PagoRequest | null>(null);
   const [isPaying, setIsPaying] = useState(false);
+  const [correlativoNC, setCorrelativoNC] = useState<CorrelativoResponse | null>(null);
+  const [correlativoLoading, setCorrelativoLoading] = useState(false);
 
   useEffect(() => {
     const fetchInvoiceDetails = async () => {
       try {
         setLoading(true);
 
-        if (id) {
-          const response: ApiResponse<Document> = await invoiceService.getInvoiceByControlNumber(id);
+        if (id && tipo_documento) {
+          const response: ApiResponse<Document> = await invoiceService.getInvoiceByControlNumber(tipo_documento, id);
 
           if (response && response.status === true && response.documento) {
             setInvoice(response.documento);
@@ -103,7 +104,7 @@ const InvoiceDetails: React.FC = () => {
     };
 
     fetchInvoiceDetails();
-  }, [id]);
+  }, [tipo_documento, id]);
 
   const handleCancelInvoice = async () => {
     if (!invoice || !reason) return;
@@ -114,6 +115,7 @@ const InvoiceDetails: React.FC = () => {
       const anularRequest: AnularDocumentoRequest = {
         nro_control: invoice.numero_control,
         motivo_anulacion: reason,
+        tipo_documento: invoice.tipo_documento,
       };
 
       const response: CancelInvoiceResponse = await invoiceService.cancelInvoice(anularRequest);
@@ -123,6 +125,7 @@ const InvoiceDetails: React.FC = () => {
           ...invoice,
           status: 'ANULADO',
           motivo_anulacion: reason,
+          tipo_documento: invoice.tipo_documento,
         });
 
         setConfirmModal(null);
@@ -159,61 +162,54 @@ const InvoiceDetails: React.FC = () => {
     }
   };
 
-  const handleGenerateCreditNote = async () => {
+  const handleGenerateCreditNote = useCallback(async () => {
     if (!invoice) {
       toast.error('No se puede generar la nota de crédito: factura no cargada.');
       return;
     }
 
-    let correlativoNC: CorrelativoResponse | null = null;
-    let correlativoCT: CorrelativoResponse | null = null;
+    let correlativo: CorrelativoResponse | null = null;
+
     try {
-      setGeneratingCreditNote(true);
+      setCorrelativoLoading(true);
+      const responseNC = await invoiceService.buscarCorrelativosPorTipo('NC');
 
-      let response = await invoiceService.buscarCorrelativosPorTipo('NC');
 
-      if (response && response.status) {
-        correlativoNC = response;
+      if (responseNC && responseNC.status) {
+        correlativo = responseNC;
+        setCorrelativoNC(responseNC);
+
       } else {
-        console.error('Error fetching correlativo for NC:', response);
-        toast.error(response?.message || 'Error al obtener el correlativo para la nota de crédito');
+        console.error('Error fetching correlativo NC:', responseNC);
+        toast.error(responseNC?.message || 'Error al obtener el correlativo NC');
+        setCorrelativoNC(null);
         return;
       }
-
-      response = await invoiceService.buscarCorrelativosPorTipo('CT');
-
-      if (response && response.status) {
-        correlativoCT = response;
-      } else {
-        console.error('Error fetching correlativo for CT:', response);
-        toast.error(response?.message || 'Error al obtener el correlativo CT');
-        return;
-      }
-
     } catch (error: any) {
-      console.error('Error fetching correlativo for NC/CT:', error);
-      toast.error(error.message || 'Error al obtener los correlativos');
+      console.error('Error fetching correlativo:', error);
+      toast.error(error.message || 'Error al obtener el correlativo');
+      setCorrelativoNC(null);
       return;
     } finally {
-      setGeneratingCreditNote(false);
+      setCorrelativoLoading(false);
     }
 
-    if (!correlativoNC || !correlativoCT) {
+
+    if (!correlativo) {
+      toast.error('No se pudo obtener el correlativo para la Nota de Crédito.');
       return;
     }
 
     try {
       setGeneratingCreditNote(true);
       const now = new Date();
-      const formattedDate = now.toISOString().split('T')[0] + ' ' + now.toTimeString().split(' ')[0];
+      const formattedDate = format(now, 'yyyy-MM-dd HH:mm:ss');
 
-      const creditNoteNumber = correlativoNC.ultimo_numero;
-      const updatedNumber = creditNoteNumber;
-      const controlNumber = correlativoCT.ultimo_numero;
-      const updatedNumberCT = correlativoCT.ultimo_numero;
+      const creditNoteNumber = Number(correlativo.ultimo_documento);
+      const controlNumber = Number(correlativo.ultimo_control);
 
       const documentoNC: Document = {
-        id_documento:0,
+        id_documento: 0,
         tipo_documento: 'NC',
         numero_documento: creditNoteNumber,
         numero_control: controlNumber,
@@ -243,7 +239,7 @@ const InvoiceDetails: React.FC = () => {
         tasa_cambio: invoice.tasa_cambio,
         direccion_envio: invoice.direccion_envio,
         serie_strong_id: `NC-` + Date.now().toString(),
-        serie: correlativoNC.serie,
+        serie: correlativo.serie,
         usuario: user?.username || '',
         status: 'PROCESADO',
         motivo_anulacion: 'Nota de crédito generada automáticamente',
@@ -275,30 +271,36 @@ const InvoiceDetails: React.FC = () => {
 
       if (responseNC && responseNC.status) {
         try {
-          await invoiceService.updateCorrelativo(correlativoNC.tipo_documento, { ultimo_numero: Number(updatedNumber) + 1 });
-          toast.success(`Nota de crédito creada y correlativo NC actualizado a: ${Number(updatedNumber) + 1}`);
+          const updateResponse = await invoiceService.updateCorrelativoDocumento(
+            correlativo.tipo_documento,
+            {
+              ultimo_documento: Number(creditNoteNumber) + 1,
+              ultimo_control: Number(controlNumber) + 1
+            }
+          );
 
-          await invoiceService.updateCorrelativo(correlativoCT.tipo_documento, { ultimo_numero: Number(updatedNumberCT) + 1 });
-          toast.success(`Correlativo CT actualizado correctamente a: ${Number(updatedNumberCT) + 1}`);
-
-          navigate(`/invoices/${controlNumber}`);
+          if (updateResponse && updateResponse.status) {
+            toast.success(`Nota de crédito creada y correlativo NC actualizado a: ${Number(creditNoteNumber) + 1}`);
+            navigate(`/invoices/${correlativo.tipo_documento}/${controlNumber}`);
+          } else {
+            console.error('Error updating correlativo:', updateResponse);
+            toast.error("Nota de crédito creada, pero hubo un error actualizando el número correlativo. Contacte al administrador");
+          }
         } catch (updateError: any) {
           console.error('Error updating correlativo after creating the credit note', updateError);
           toast.error("Nota de crédito creada, pero hubo un error actualizando el número correlativo. Contacte al administrador");
         }
-
       } else {
         console.error('Error creating credit note:', responseNC);
         toast.error(responseNC?.message || 'Error al crear la nota de crédito');
       }
-
     } catch (error: any) {
       console.error('Error al generar la nota de crédito:', error);
       toast.error(error.message || 'Error al generar la nota de crédito');
     } finally {
       setGeneratingCreditNote(false);
     }
-  };
+  }, [invoice, user, details, navigate, invoiceService]);
 
   const handleOpenPaymentModal = () => {
     setPaymentModalOpen(true);
@@ -347,8 +349,8 @@ const InvoiceDetails: React.FC = () => {
         const fetchInvoiceDetails = async () => {
           try {
             setLoading(true);
-            if (id) {
-              const response: ApiResponse<Document> = await invoiceService.getInvoiceByControlNumber(id);
+            if (id && tipo_documento) {
+              const response: ApiResponse<Document> = await invoiceService.getInvoiceByControlNumber(tipo_documento, id);
 
               if (response && response.status === true && response.documento) {
                 setInvoice(response.documento);
@@ -458,14 +460,14 @@ const InvoiceDetails: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap mt-4 md:mt-0 space-x-0 space-y-2 sm:space-x-2 sm:space-y-0">
-          {invoice.tipo_documento === 'FA' && invoice.status == 'PROCESADO'  && (
+          {invoice.tipo_documento === 'FA' && invoice.status == 'PROCESADO' && (
             <>
               <button
                 onClick={handleGenerateCreditNote}
                 className="btn btn-secondary w-full sm:w-auto flex items-center justify-center"
-                disabled={generatingCreditNote}
+                disabled={generatingCreditNote || correlativoLoading}
               >
-                {generatingCreditNote ? (
+                {generatingCreditNote || correlativoLoading ? (
                   <LoadingSpinner size="sm" text="Generando..." />
                 ) : (
                   <>
@@ -483,16 +485,16 @@ const InvoiceDetails: React.FC = () => {
 
           {invoice.status === 'PROCESADO' && invoice.tipo_documento == 'FA' && (
             <>
-             {invoice.saldo != 0.00 && (
+              {invoice.saldo != 0.00 && (
                 <button
-                    onClick={handleOpenPaymentModal}
-                    className="btn btn-success w-full sm:w-auto flex items-center justify-center"
+                  onClick={handleOpenPaymentModal}
+                  className="btn btn-success w-full sm:w-auto flex items-center justify-center"
                 >
-                     <DollarSign className="h-4 w-4 mr-1" />
-                    Pagar Factura
+                  <DollarSign className="h-4 w-4 mr-1" />
+                  Pagar Factura
                 </button>
-             )}
-              
+              )}
+
               <button
                 onClick={() => setConfirmModal('anular')}
                 className="btn btn-secondary w-full sm:w-auto flex items-center justify-center"
@@ -501,39 +503,39 @@ const InvoiceDetails: React.FC = () => {
                 Anular
               </button>
 
-              
+
             </>
           )}
         </div>
       </div>
 
       {/* Invoice status */}
-         <div className={`mb-6 p-4 rounded-lg border ${getInvoiceStatusStyle()}`}>
-            <div className="flex items-start">
-                <div className="flex-shrink-0">
-                    {invoice.status === 'ANULADO' ? (
-                        <XCircle className="h-5 w-5" />
-                    ) : invoice.saldo === 0 ? (
-                        <Receipt className="h-5 w-5" />
-                    ) : (invoice.saldo !== undefined && invoice.saldo < Number(invoice.total_general)) ? (
-                        <AlertTriangle className="h-5 w-5" />
-                    ) : (
-                        <XCircle className="h-5 w-5" />
-                    )}
-                </div>
-                <div className="ml-3">
-                    <h3 className="text-sm font-medium">
-                        {invoice.status === 'ANULADO' ? 'Factura anulada' :
-                            invoice.saldo == 0.00 ? 'Factura pagada' : (invoice.saldo > 0 && invoice.saldo < Number(invoice.total_general)) ? 'Factura parcialmente pagada' : 'Factura pendiente por pagar'}
-                    </h3>
-                    {invoice.status === 'ANULADO' && invoice.motivo_anulacion && (
-                        <p className="mt-1 text-sm">
-                            Motivo: {invoice.motivo_anulacion}
-                        </p>
-                    )}
-                </div>
-            </div>
+      <div className={`mb-6 p-4 rounded-lg border ${getInvoiceStatusStyle()}`}>
+        <div className="flex items-start">
+          <div className="flex-shrink-0">
+            {invoice.status === 'ANULADO' ? (
+              <XCircle className="h-5 w-5" />
+            ) : invoice.saldo === 0 ? (
+              <Receipt className="h-5 w-5" />
+            ) : (invoice.saldo !== undefined && invoice.saldo < Number(invoice.total_general)) ? (
+              <AlertTriangle className="h-5 w-5" />
+            ) : (
+              <XCircle className="h-5 w-5" />
+            )}
+          </div>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium">
+              {invoice.status === 'ANULADO' ? 'Factura anulada' :
+                invoice.saldo == 0.00 ? 'Factura pagada' : (invoice.saldo > 0 && invoice.saldo < Number(invoice.total_general)) ? 'Factura parcialmente pagada' : 'Factura pendiente por pagar'}
+            </h3>
+            {invoice.status === 'ANULADO' && invoice.motivo_anulacion && (
+              <p className="mt-1 text-sm">
+                Motivo: {invoice.motivo_anulacion}
+              </p>
+            )}
+          </div>
         </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Invoice details */}
@@ -658,69 +660,69 @@ const InvoiceDetails: React.FC = () => {
             </div>
           </div>
 
-            {/* Payments */}
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-                <div className="px-4 py-5 sm:p-6">
-                    <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-                        <CreditCard className="h-5 w-5 mr-2 text-success-500" />
-                        Pagos
-                    </h3>
+          {/* Payments */}
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="px-4 py-5 sm:p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+                <CreditCard className="h-5 w-5 mr-2 text-success-500" />
+                Pagos
+              </h3>
 
-                    {payments.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                    <tr>
-                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Tipo
-                                        </th>
-                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Referencia
-                                        </th>
-                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Banco
-                                        </th>
-                                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Fecha
-                                        </th>
-                                        <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Monto
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-gray-200">
-                                    {payments.map((payment, index) => (
-                                        <tr key={index}>
-                                            <td className="px-4 py-3 text-sm text-gray-900">
-                                                {payment.desc_tipo_pago}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-gray-900">
-                                                {payment.referencia}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-gray-900">
-                                                {payment.banco}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-gray-500">
-                                                {formatDate(payment.fecha_pago)}
-                                            </td>
-                                            <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
-                                                VES {formatCurrency(payment.monto)}
-                                                <div className="text-xs text-gray-500">
-                                                    {payment.moneda} (TC: {payment.tasa_cambio})
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <div className="text-center py-6 text-gray-500">
-                            No hay pagos registrados
-                        </div>
-                    )}
+              {payments.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Tipo
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Referencia
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Banco
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Fecha
+                        </th>
+                        <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Monto
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {payments.map((payment, index) => (
+                        <tr key={index}>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {payment.desc_tipo_pago}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {payment.referencia}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900">
+                            {payment.banco}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {formatDate(payment.fecha_pago)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                            VES {formatCurrency(payment.monto)}
+                            <div className="text-xs text-gray-500">
+                              {payment.moneda} (TC: {payment.tasa_cambio})
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+              ) : (
+                <div className="text-center py-6 text-gray-500">
+                  No hay pagos registrados
+                </div>
+              )}
             </div>
+          </div>
         </div>
 
         {/* Right column - Summary and customer info */}
@@ -729,7 +731,7 @@ const InvoiceDetails: React.FC = () => {
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <div className="px-4 py-5 sm:p-6">
 
-             
+
 
               <h3 className="text-lg font-medium text-gray-900 mb-4">Resumen</h3>
 
@@ -808,410 +810,416 @@ const InvoiceDetails: React.FC = () => {
                 <div className="text-sm">
                   <div className="text-gray-500">Dirección fiscal:</div>
                   <div>{invoice.direccion_fiscal}</div>
-                </div>
-
-                <div className="text-sm">
-                <div className="text-gray-500">Teléfono:</div>
-                  <div>{invoice.telefono}</div>
-                </div>
-
-                {invoice.direccion_envio && invoice.direccion_envio !== invoice.direccion_fiscal &&  (
-                  <div className="text-sm">
-                    <div className="text-gray-500">Dirección de envío:</div>
-                    <div>{invoice.direccion_envio}</div>
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+
+<div className="text-sm">
+  <div className="text-gray-500">Teléfono:</div>
+  <div>{invoice.telefono}</div>
+</div>
+
+{invoice.direccion_envio && invoice.direccion_envio !== invoice.direccion_fiscal && (
+  <div className="text-sm">
+    <div className="text-gray-500">Dirección de envío:</div>
+    <div>{invoice.direccion_envio}</div>
+  </div>
+)}
+</div>
+</div>
+</div>
+</div>
+</div>
+
+{/* Confirmation modals */}
+{confirmModal === 'anular' && (
+<div className="fixed z-50 inset-0 overflow-y-auto">
+<div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+<div className="fixed inset-0 transition-opacity" aria-hidden="true">
+<div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+</div>
+
+<div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+<div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+<div className="sm:flex sm:items-start">
+  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-warning-100 sm:mx-0 sm:h-10 sm:w-10">
+    <AlertTriangle className="h-6 w-6 text-warning-600" aria-hidden="true" />
+  </div>
+  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+    <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+      Anular factura
+    </h3>
+    <div className="mt-2">
+      <p className="text-sm text-gray-500">
+        ¿Estás seguro de que quieres anular esta factura? Esta acción no se puede deshacer.
+      </p>
+      <div className="mt-4">
+        <label htmlFor="reason" className="block text-sm font-medium text-gray-700">
+          Motivo de anulación *
+        </label>
+        <textarea
+          id="reason"
+          rows={3}
+          className="mt-1 input"
+          placeholder="Ingrese el motivo de anulación"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          required
+        />
       </div>
-
-      {/* Confirmation modals */}
-      {confirmModal === 'anular' && (
-        <div className="fixed z-50 inset-0 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-            </div>
-
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="sm:flex sm:items-start">
-                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-warning-100 sm:mx-0 sm:h-10 sm:w-10">
-                    <AlertTriangle className="h-6 w-6 text-warning-600" aria-hidden="true" />
-                  </div>
-                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                      Anular factura
-                    </h3>
-                    <div className="mt-2">
-                      <p className="text-sm text-gray-500">
-                        ¿Estás seguro de que quieres anular esta factura? Esta acción no se puede deshacer.
-                      </p>
-                      <div className="mt-4">
-                        <label htmlFor="reason" className="block text-sm font-medium text-gray-700">
-                          Motivo de anulación *
-                        </label>
-                        <textarea
-                          id="reason"
-                          rows={3}
-                          className="mt-1 input"
-                          placeholder="Ingrese el motivo de anulación"
-                          value={reason}
-                          onChange={(e) => setReason(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button
-                  type="button"
-                  className="w-full inline-flex justify-center rounded-md  border border-transparent shadow-sm px-4 py-2 bg-warning-600 text-base font-medium text-white hover:bg-warning-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-warning-500 sm:ml-3 sm:w-auto sm:text-sm"
-                  onClick={handleCancelInvoice}
-                  disabled={!reason}
-                >
-                  Anular
-                </button>
-                <button
-                  type="button"
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                  onClick={() => {
-                    setConfirmModal(null);
-                    setReason('');
-                  }}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {confirmModal === 'eliminar' && (
-        <div className="fixed z-50 inset-0 overflow-y-auto">
-          <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-            </div>
-
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="sm:flex sm:items-start">
-                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-error-100 sm:mx-0 sm:h-10 sm:w-10">
-                    <AlertTriangle className="h-6 w-6 text-error-600" aria-hidden="true" />
-                  </div>
-                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                      Eliminar factura
-                    </h3>
-                    <div className="mt-2">
-                      <p className="text-sm text-gray-500">
-                        ¿Estás seguro de que quieres eliminar permanentemente esta factura? Esta acción
-                        no se puede deshacer y eliminará todos los datos asociados.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                <button
-                  type="button"
-                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-error-600 text-base font-medium text-white hover:bg-error-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-error-500 sm:ml-3 sm:w-auto sm:text-sm"
-                  onClick={handleDeleteInvoice}
-                >
-                  Eliminar
-                </button>
-                <button
-                  type="button"
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                  onClick={() => setConfirmModal(null)}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-          {paymentModalOpen && invoice && (
-                <PaymentModal
-                    invoice={invoice}
-                    initialAmount={invoice.saldo || 0} // Pass the initial saldo value
-                    total={Number(invoice.total_general)}
-                    onClose={handleClosePaymentModal}
-                    onPaymentSuccess={handlePaymentSuccess}
-                    loading={isPaying}
-                />
-            )}
     </div>
-  );
+  </div>
+</div>
+</div>
+<div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+<button
+  type="button"
+  className="w-full inline-flex justify-center rounded-md  border border-transparent shadow-sm px-4 py-2 bg-warning-600 text-base font-medium text-white hover:bg-warning-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-warning-500 sm:ml-3 sm:w-auto sm:text-sm"
+  onClick={handleCancelInvoice}
+  disabled={!reason}
+>
+  Anular
+</button>
+<button
+  type="button"
+  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+  onClick={() => {
+    setConfirmModal(null);
+    setReason('');
+  }}
+>
+  Cancelar
+</button>
+</div>
+</div>
+</div>
+</div>
+)}
+
+{confirmModal === 'eliminar' && (
+<div className="fixed z-50 inset-0 overflow-y-auto">
+<div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+<div className="fixed inset-0 transition-opacity" aria-hidden="true">
+<div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+</div>
+
+<div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+<div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+<div className="sm:flex sm:items-start">
+  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-error-100 sm:mx-0 sm:h-10 sm:w-10">
+    <AlertTriangle className="h-6 w-6 text-error-600" aria-hidden="true" />
+  </div>
+  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+    <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+      Eliminar factura
+    </h3>
+    <div className="mt-2">
+      <p className="text-sm text-gray-500">
+        ¿Estás seguro de que quieres eliminar permanentemente esta factura? Esta acción
+        no se puede deshacer y eliminará todos los datos asociados.
+      </p>
+    </div>
+  </div>
+</div>
+</div>
+<div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+<button
+  type="button"
+  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-error-600 text-base font-medium text-white hover:bg-error-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-error-500 sm:ml-3 sm:w-auto sm:text-sm"
+  onClick={handleDeleteInvoice}
+>
+  Eliminar
+</button>
+<button
+  type="button"
+  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+  onClick={() => setConfirmModal(null)}
+>
+  Cancelar
+</button>
+</div>
+</div>
+</div>
+</div>
+)}
+
+{paymentModalOpen && invoice && (
+<PaymentModal
+invoice={invoice}
+initialAmount={invoice.saldo || 0} // Pass the initial saldo value
+total={Number(invoice.total_general)}
+onClose={handleClosePaymentModal}
+onPaymentSuccess={handlePaymentSuccess}
+loading={isPaying}
+/>
+)}
+{/* Correlativo Loading Overlay */}
+{correlativoLoading && (
+<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+<LoadingSpinner text="Cargando correlativo NC..." />
+</div>
+)}
+</div>
+);
 };
 
 // Payment Modal Component
 interface PaymentModalProps {
-    invoice:Document,
-    total: number;
-    onClose: () => void;
-    onPaymentSuccess: (paymentInfo: any) => void;
-    loading: boolean;
-  initialAmount: number;
+invoice: Document,
+total: number;
+onClose: () => void;
+onPaymentSuccess: (paymentInfo: any) => void;
+loading: boolean;
+initialAmount: number;
 }
 
 const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onPaymentSuccess, loading, invoice, initialAmount }) => {
-  const [paymentMethod, setPaymentMethod] = useState('efectivo');
-  const [amount, setAmount] = useState(String(initialAmount)); // Initialize as empty string
-    const [reference, setReference] = useState('');
-    const [bank, setBank] = useState(' ');
-    const [isPaid, setIsPaid] = useState(true);
-    const [currency, setCurrency] = useState('VES'); // Default to VES
-    const [exchangeRate, setExchangeRate] = useState('1');
-    const [paymentCurrency, setPaymentCurrency] = useState('VES');
-    const [amountError, setAmountError] = useState('');
-    const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+const [paymentMethod, setPaymentMethod] = useState('efectivo');
+const [amount, setAmount] = useState(String(initialAmount)); // Initialize as empty string
+const [reference, setReference] = useState('');
+const [bank, setBank] = useState(' ');
+const [isPaid, setIsPaid] = useState(true);
+const [currency, setCurrency] = useState('VES'); // Default to VES
+const [exchangeRate, setExchangeRate] = useState('1');
+const [paymentCurrency, setPaymentCurrency] = useState('VES');
+const [amountError, setAmountError] = useState('');
+const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
-  useEffect(() => {
-        // Update amount when initialAmount changes to keep the value updated on VES, formatted to 2 decimal places
-        setAmount(String(initialAmount));
-  }, [initialAmount]);
+useEffect(() => {
+// Update amount when initialAmount changes to keep the value updated on VES, formatted to 2 decimal places
+setAmount(String(initialAmount));
+}, [initialAmount]);
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!amount) {
-            setAmountError('El monto es requerido');
-            return;
-        }
+const handleSubmit = (e: React.FormEvent) => {
+e.preventDefault();
+if (!amount) {
+setAmountError('El monto es requerido');
+return;
+}
 
-         // Get the current time
-        const now = new Date();
-        const formattedTime = now.toTimeString().split(' ')[0]; // Get HH:mm:ss
+// Get the current time
+const now = new Date();
+const formattedTime = now.toTimeString().split(' ')[0]; // Get HH:mm:ss
 
-        // Combine selected date with current time
-        const formattedPaymentDate = `${paymentDate} ${formattedTime}`; //yyyy-MM-dd HH:mm:ss
+// Combine selected date with current time
+const formattedPaymentDate = `${paymentDate} ${formattedTime}`; //yyyy-MM-dd HH:mm:ss
 
-      const paymentInfo = {
-        metodoPago: paymentMethod,
-        amount: amount, // Use the formatted amount from state
-        referencia: reference,
-        banco: bank,
-        isPaid: true, // Mark as paid is always true, since now credit option is shown before calling to the Payment modal
-        currency: currency,
-        exchangeRate: parseFloat(exchangeRate),
-         paymentCurrency: paymentCurrency,
-        fecha_pago: formattedPaymentDate // Send combined date and time
-      };
+const paymentInfo = {
+metodoPago: paymentMethod,
+amount: amount, // Use the formatted amount from state
+referencia: reference,
+banco: bank,
+isPaid: true, // Mark as paid is always true, since now credit option is shown before calling to the Payment modal
+currency: currency,
+exchangeRate: parseFloat(exchangeRate),
+paymentCurrency: paymentCurrency,
+fecha_pago: formattedPaymentDate // Send combined date and time
+};
 
-        onPaymentSuccess(paymentInfo);
-    };
+onPaymentSuccess(paymentInfo);
+};
 
-    const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value;
-        setAmount(value);
+const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+const value = e.target.value;
+setAmount(value);
 
-        if (!value) {
-            setAmountError('El monto es requerido');
-        } else if (isNaN(parseFloat(value))) {
-            setAmountError('El monto debe ser un número');
-        } else {
-            setAmountError('');
-        }
-    };
+if (!value) {
+setAmountError('El monto es requerido');
+} else if (isNaN(parseFloat(value))) {
+setAmountError('El monto debe ser un número');
+} else {
+setAmountError('');
+}
+};
 
-    const handleReferenceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setReference(e.target.value);
-    }
+const handleReferenceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+setReference(e.target.value);
+}
 
-    const handleCurrencyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        setCurrency(e.target.value);
-        setPaymentCurrency(e.target.value); //Also, update the payment currency
-        if (e.target.value === 'VES') {
-            setExchangeRate('1'); // Reset exchange rate to 1 if VES is selected
-        }
-    };
-    const handlePaymentDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setPaymentDate(e.target.value);
-    };
+const handleCurrencyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+setCurrency(e.target.value);
+setPaymentCurrency(e.target.value); //Also, update the payment currency
+if (e.target.value === 'VES') {
+setExchangeRate('1'); // Reset exchange rate to 1 if VES is selected
+}
+};
+const handlePaymentDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+setPaymentDate(e.target.value);
+};
 
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
-                <h3 className="text-xl font-bold mb-4 flex items-center">
-                    <CreditCard className="h-5 w-5 mr-2" />
-                    Procesar pago
-                </h3>
+return (
+<div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center p-4 z-50">
+<div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
+<h3 className="text-xl font-bold mb-4 flex items-center">
+<CreditCard className="h-5 w-5 mr-2" />
+Procesar pago
+</h3>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="bg-gray-50 p-3 rounded-lg mb-4">
-                        <div className="text-gray-700">Total a pagar:</div>
-                        <div className="text-2xl font-bold text-gray-900">
-                            {currency === 'USD' ? `VES ${(total * parseFloat(exchangeRate)).toFixed(2)}` : `VES ${total.toFixed(2)}`}
-                        </div>
-                    </div>
+<form onSubmit={handleSubmit} className="space-y-4">
+<div className="bg-gray-50 p-3 rounded-lg mb-4">
+<div className="text-gray-700">Total a pagar:</div>
+<div className="text-2xl font-bold text-gray-900">
+{currency === 'USD' ? `VES ${(total * parseFloat(exchangeRate)).toFixed(2)}` : `VES ${total.toFixed(2)}`}
+</div>
+</div>
 
-                    <div>
-                        <label className="label">Método de pago</label>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                type="button"
-                                className={`flex items-center justify-center p-3 rounded-lg border ${paymentMethod === 'efectivo'
-                                    ? 'bg-primary-50 border-primary-500 text-primary-700'
-                                    : 'border-gray-300 text-gray-700'
-                                    }`}
-                                onClick={() => setPaymentMethod('efectivo')}
-                            >
-                                <DollarSign className="h-5 w-5 mr-2" />
-                                Efectivo
-                            </button>
+<div>
+<label className="label">Método de pago</label>
+<div className="grid grid-cols-2 gap-3">
+<button
+type="button"
+className={`flex items-center justify-center p-3 rounded-lg border ${paymentMethod === 'efectivo'
+  ? 'bg-primary-50 border-primary-500 text-primary-700'
+  : 'border-gray-300 text-gray-700'
+  }`}
+onClick={() => setPaymentMethod('efectivo')}
+>
+<DollarSign className="h-5 w-5 mr-2" />
+Efectivo
+</button>
 
-                            <button
-                                type="button"
-                                className={`flex items-center justify-center p-3 rounded-lg border ${paymentMethod === 'transferencia'
-                                    ? 'bg-primary-50 border-primary-500 text-primary-700'
-                                    : 'border-gray-300 text-gray-700'
-                                    }`}
-                                onClick={() => setPaymentMethod('transferencia')}
-                            >
-                                <CreditCard className="h-5 w-5 mr-2" />
-                                Transferencia
-                            </button>
-                        </div>
-                    </div>
+<button
+type="button"
+className={`flex items-center justify-center p-3 rounded-lg border ${paymentMethod === 'transferencia'
+  ? 'bg-primary-50 border-primary-500 text-primary-700'
+  : 'border-gray-300 text-gray-700'
+  }`}
+onClick={() => setPaymentMethod('transferencia')}
+>
+<CreditCard className="h-5 w-5 mr-2" />
+Transferencia
+</button>
+</div>
+</div>
 
-                    <div>
-                        <label htmlFor="amount" className="label">Monto recibido</label>
-                        <input
-                          type="number"
-                          id="amount"
-                          className={`input ${amountError ? 'border-error-500' : ''}`} // Apply a class for error styling
-                          value={amount}
-                          onChange={handleAmountChange}
-                          min="0"
-                          step="0.01"
-                          required
-                        />
-                        {amountError && <p className="text-error-500 text-sm">{amountError}</p>}
-                    </div>
+<div>
+<label htmlFor="amount" className="label">Monto recibido</label>
+<input
+type="number"
+id="amount"
+className={`input ${amountError ? 'border-error-500' : ''}`} // Apply a class for error styling
+value={amount}
+onChange={handleAmountChange}
+min="0"
+step="0.01"
+required
+/>
+{amountError && <p className="text-error-500 text-sm">{amountError}</p>}
+</div>
 
-                    <div>
-                        <label htmlFor="reference" className="label">Referencia</label>
-                        <input
-                            type="text"
-                            id="reference"
-                            className="input"
-                            value={reference}
-                            onChange={handleReferenceChange}
-                        />
-                    </div>
-                         <div>
-                        <label htmlFor="paymentDate" className="label">Fecha de pago</label>
-                        <input
-                            type="date"
-                            id="paymentDate"
-                            className="input"
-                            value={paymentDate}
-                            onChange={handlePaymentDateChange}
-                            required
-                        />
-                    </div>
+<div>
+<label htmlFor="reference" className="label">Referencia</label>
+<input
+type="text"
+id="reference"
+className="input"
+value={reference}
+onChange={handleReferenceChange}
+/>
+</div>
+<div>
+<label htmlFor="paymentDate" className="label">Fecha de pago</label>
+<input
+type="date"
+id="paymentDate"
+className="input"
+value={paymentDate}
+onChange={handlePaymentDateChange}
+required
+/>
+</div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label htmlFor="currency" className="label">Moneda</label>
-                            <select
-                                id="currency"
-                                className="input"
-                                value={currency}
-                                onChange={handleCurrencyChange}
-                            >
-                                <option value="VES">VES</option>
-                                <option value="USD">USD</option>
-                            </select>
-                        </div>
+<div className="grid grid-cols-2 gap-4">
+<div>
+<label htmlFor="currency" className="label">Moneda</label>
+<select
+id="currency"
+className="input"
+value={currency}
+onChange={handleCurrencyChange}
+>
+<option value="VES">VES</option>
+<option value="USD">USD</option>
+</select>
+</div>
 
-                        <div>
-                            <label htmlFor="exchangeRate" className="label">Tasa de cambio</label>
-                            <input
-                                type="number"
-                                id="exchangeRate"
-                                className="input"
-                                value={exchangeRate}
-                                onChange={(e) => setExchangeRate(e.target.value)}
-                                min="0"
-                                step="0.01"
-                                required={currency === 'USD'}
-                                disabled={currency === 'VES'}
-                            />
-                        </div>
-                    </div>
+<div>
+<label htmlFor="exchangeRate" className="label">Tasa de cambio</label>
+<input
+type="number"
+id="exchangeRate"
+className="input"
+value={exchangeRate}
+onChange={(e) => setExchangeRate(e.target.value)}
+min="0"
+step="0.01"
+required={currency === 'USD'}
+disabled={currency === 'VES'}
+/>
+</div>
+</div>
 
-                    {paymentMethod === 'transferencia' && (
-                        <>
+{paymentMethod === 'transferencia' && (
+<>
 
-                            <div>
-                                <label htmlFor="bank" className="label">Banco</label>
-                                <select
-                                    id="bank"
-                                    className="input"
-                                    value={bank}
-                                    onChange={(e) => setBank(e.target.value)}
-                                    required={paymentMethod === 'transferencia'}
-                                >
-                                    <option value="">Seleccionar banco...</option>
-                                    <option value="Banesco">Banesco</option>
-                                    <option value="Provincial">Provincial</option>
-                                    <option value="Mercantil">Mercantil</option>
-                                    <option value="Venezuela">Venezuela</option>
-                                </select>
-                            </div>
-                        </>
-                    )}
+<div>
+<label htmlFor="bank" className="label">Banco</label>
+<select
+  id="bank"
+  className="input"
+  value={bank}
+  onChange={(e) => setBank(e.target.value)}
+  required={paymentMethod === 'transferencia'}
+>
+  <option value="">Seleccionar banco...</option>
+  <option value="Banesco">Banesco</option>
+  <option value="Provincial">Provincial</option>
+  <option value="Mercantil">Mercantil</option>
+  <option value="Venezuela">Venezuela</option>
+</select>
+</div>
+</>
+)}
 
-                    <div className="flex items-center mt-4">
-                        <input
-                            type="checkbox"
-                            id="isPaid"
-                            checked={isPaid}
-                            onChange={(e) => setIsPaid(e.target.checked)}
-                            className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                        />
-                        <label htmlFor="isPaid" className="ml-2 block text-sm text-gray-900">
-                            Marcar como pagado
-                        </label>
-                    </div>
+<div className="flex items-center mt-4">
+<input
+type="checkbox"
+id="isPaid"
+checked={isPaid}
+onChange={(e) => setIsPaid(e.target.checked)}
+className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+/>
+<label htmlFor="isPaid" className="ml-2 block text-sm text-gray-900">
+Marcar como pagado
+</label>
+</div>
 
-                    <div className="flex justify-end space-x-3 pt-4">
-                        <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={onClose}
-                            disabled={loading}
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            className="btn btn-success flex items-center"
-                            disabled={loading || amountError !== ''}
-                        >
-                            {loading ? (
-                                <LoadingSpinner size="sm" text="" />
-                            ) : (
-                                <>
-                                    <Receipt className="h-4 w-4 mr-1" />
-                                    Completar pago
-                                </>
-                            )}
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    );
+<div className="flex justify-end space-x-3 pt-4">
+<button
+type="button"
+className="btn btn-secondary"
+onClick={onClose}
+disabled={loading}
+>
+Cancelar
+</button>
+<button
+type="submit"
+className="btn btn-success flex items-center"
+disabled={loading || amountError !== ''}
+>
+{loading ? (
+<LoadingSpinner size="sm" text="" />
+) : (
+<>
+  <Receipt className="h-4 w-4 mr-1" />
+  Completar venta
+</>
+)}
+</button>
+</div>
+</form>
+</div>
+</div>
+);
 };
 
 export default InvoiceDetails;

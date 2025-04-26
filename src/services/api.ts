@@ -24,7 +24,8 @@ export interface CorrelativoResponse {
     id: string;
     tipo_documento: string;
     serie: string;
-    ultimo_numero: number;
+    ultimo_documento: number;
+    ultimo_control: number;
     message?: string;
 }
 
@@ -86,10 +87,10 @@ export const invoiceService = {
     },
 
     // Search document by control number
-    getInvoiceByControlNumber: async (nroControl: string): Promise<InvoiceResponse> => {
+    getInvoiceByControlNumber: async (tipo_documento: string, nroControl: string): Promise<InvoiceResponse> => {
         return handleApiCall(() =>
             api.get('/buscarDocumentoControl/buscarDocumentoControl.php', {
-                params: { nro_control: nroControl },
+                params: { tipo_documento: tipo_documento, nro_control: nroControl },
             }).then(response => response.data)
         );
     },
@@ -101,7 +102,7 @@ export const invoiceService = {
     ): Promise<InvoiceResponse> => {
         return handleApiCall(() =>
             api.get('/buscarDocumentoNumero/buscarDocumentoNumero.php', {
-                params: { tipo_documento: tipoDocumento, numeroDocumento: numeroDocumento },
+                params: { tipo_documento: tipoDocumento, numero_documento: numeroDocumento },
             }).then(response => response.data)
         );
     },
@@ -178,12 +179,13 @@ export const invoiceService = {
     },
 
     // Update Correlativo
-    updateCorrelativo: async (tipoDocumento: string, data: { ultimo_numero: number }): Promise<any> => {
+    updateCorrelativoDocumento: async (tipoDocumento: string, data: { ultimo_documento: number, ultimo_control: number }): Promise<any> => {
         return handleApiCall(() =>
             api.put(`/actualizarCorrelativo/actualizarCorrelativo.php?tipo_documento=${tipoDocumento}`, data)
                 .then(response => response.data)
         );
-    }
+    },
+
 };
 
 export default api;

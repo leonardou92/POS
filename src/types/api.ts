@@ -119,6 +119,7 @@ export interface EliminarDocumentoRequest {
 // types/api.ts
 export interface Client {
   id: string;
+  tipoDocumento: string;
   razonSocial: string;
   registroFiscal: string;
   direccionFiscal: string;

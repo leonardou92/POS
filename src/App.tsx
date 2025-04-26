@@ -31,7 +31,7 @@ function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/pos" element={<POS />} />
             <Route path="/invoices" element={<Invoices />} />
-            <Route path="/invoices/:id" element={<InvoiceDetails />} />
+            <Route path="/invoices/:tipo_documento/:id" element={<InvoiceDetails />} />
             <Route path="/customers" element={<Customers />} />
             <Route path="/products" element={<Products />} /> {/* <-- Add this line */}
           </Route>

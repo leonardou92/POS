@@ -358,7 +358,7 @@ const Invoices: React.FC = () => {
                         <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
                           <div className="flex justify-end items-center space-x-2">
                             <Link
-                              to={`/invoices/${invoice.numero_control}`}
+                              to={`/invoices/${invoice.tipo_documento}/${invoice.numero_control}`}
                               className="text-primary-600 hover:text-primary-900"
                               title="Ver detalles"
                             >

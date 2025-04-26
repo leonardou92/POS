@@ -1,3 +1,5 @@
+//Inside POS.tsx
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
@@ -26,7 +28,8 @@ interface CorrelativoResponse {
     id: string;
     tipo_documento: string;
     serie: string;
-    ultimo_numero: number;
+    ultimo_documento: number;
+    ultimo_control: number;
 }
 
 interface ConfirmationModalProps {
@@ -99,11 +102,11 @@ const POS: React.FC = () => {
     const [rifSearchTerm, setRifSearchTerm] = useState(''); //Local RIF search
     const [showCreditOption, setShowCreditOption] = useState(false); // Display credit option
 
-    //const [correlativo, setCorrelativo] = useState<CorrelativoResponse | null>(null); REMOVED: Now we fetch correlativo inside the completeSale handler
+    const [correlativo, setCorrelativo] = useState<CorrelativoResponse | null>(null); // REMOVED: Now we fetch correlativo inside the completeSale handler
     const [correlativoLoading, setCorrelativoLoading] = useState(false);
     const [noCorrelativoAlert, setNoCorrelativoAlert] = useState(false); // State for no correlativo alert
 
-    const [correlativoCT, setCorrelativoCT] = useState<CorrelativoResponse | null>(null);
+    //const [correlativoCT, setCorrelativoCT] = useState<CorrelativoResponse | null>(null);
     const [correlativoCTLoading, setCorrelativoCTLoading] = useState(false);
     const [noCorrelativoCTAlert, setNoCorrelativoCTAlert] = useState(false);
 
@@ -136,8 +139,6 @@ const POS: React.FC = () => {
             } catch (error: any) {
                 console.error('Error fetching products:', error);
                 toast.error(error.message || 'Error al cargar los productos');
-                setProducts([]);
-                setFilteredProducts([]);
             } finally {
                 setLoading(false);
             }
@@ -146,63 +147,6 @@ const POS: React.FC = () => {
         fetchProducts();
     }, [user?.sucursal]);
 
-    const fetchCorrelativoCT = async () => {
-        try {
-            setCorrelativoCTLoading(true);
-            const response = await invoiceService.buscarCorrelativosPorTipo('CT'); // Assuming 'CT' is the document type for Control Number
-
-            if (response && response.status) {
-                setCorrelativoCT(response);
-                setNoCorrelativoCTAlert(false);
-            } else {
-                console.error('Error fetching correlativo CT:', response);
-                toast.error(response?.message || 'Error al obtener el correlativo CT');
-                setCorrelativoCT(null);
-                setNoCorrelativoCTAlert(true);
-            }
-        } catch (error: any) {
-            console.error('Error fetching correlativo CT:', error);
-            toast.error(error.message || 'Error al obtener el correlativo CT');
-            setCorrelativoCT(null);
-            setNoCorrelativoCTAlert(true);
-        } finally {
-            setCorrelativoCTLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchCorrelativoCT();
-    }, []);
-
-    /*
-    useEffect(() => {
-        const fetchCorrelativo = async () => {
-            try {
-                setCorrelativoLoading(true);
-                const response = await invoiceService.buscarCorrelativosPorTipo('FA'); // Assuming 'FA' is the document type for invoices
-
-                if (response && response.status) {
-                    setCorrelativo(response);
-                    setNoCorrelativoAlert(false); // Clear the alert if correlativo is found
-                } else {
-                    console.error('Error fetching correlativo:', response);
-                    toast.error(response?.message || 'Error al obtener el correlativo');
-                    setCorrelativo(null);
-                    setNoCorrelativoAlert(true); // Set the alert to true
-                }
-            } catch (error: any) {
-                console.error('Error fetching correlativo:', error);
-                toast.error(error.message || 'Error al obtener el correlativo');
-                setCorrelativo(null);
-                setNoCorrelativoAlert(true); // Set the alert to true
-            } finally {
-                setCorrelativoLoading(false);
-            }
-        };
-
-        fetchCorrelativo();
-    }, []);
-    */
 
     const fetchCustomers = useCallback(async () => {
         try {
@@ -278,6 +222,7 @@ const POS: React.FC = () => {
                 if ((apiResponse as any).status === true) {
                     const adaptedClient: Client = {
                         id: (apiResponse as any).id || '',
+                        tipoDocumento: (apiResponse as any).tipoDocumento || '',
                         razonSocial: (apiResponse as any).razonSocial || '',
                         registroFiscal: (apiResponse as any).registroFiscal || '',
                         direccionFiscal: (apiResponse as any).direccionFiscal || '',
@@ -397,34 +342,8 @@ const POS: React.FC = () => {
         }
 
         // ************************* FETCH THE CORRELATIVO CT HERE ******************************
-        let correlativoCT: CorrelativoResponse | null = null;
-        try {
-            setCorrelativoCTLoading(true);
-            const response = await invoiceService.buscarCorrelativosPorTipo('CT');
-
-            if (response && response.status) {
-                correlativoCT = response;
-                setNoCorrelativoCTAlert(false);
-            } else {
-                console.error('Error fetching correlativo CT:', response);
-                toast.error(response?.message || 'Error al obtener el correlativo CT');
-                correlativoCT = null;
-                setNoCorrelativoCTAlert(true);
-            }
-        } catch (error: any) {
-            console.error('Error fetching correlativo CT:', error);
-            toast.error(error.message || 'Error al obtener el correlativo CT');
-            correlativoCT = null;
-            setNoCorrelativoCTAlert(true);
-        } finally {
-            setCorrelativoCTLoading(false);
-        }
-
-        if (!correlativoCT) {
-            return;
-        }
-
-
+       
+        
         try {
             setLoading(true);
 
@@ -433,14 +352,10 @@ const POS: React.FC = () => {
                 now.toTimeString().split(' ')[0];
 
             // Use the correlativo number before incrementing it
-            const invoiceNumber = Number(correlativo.ultimo_numero);
-            // const controlNumber = Number(invoiceNumber); //SAME VALUE
-            const controlNumber = Number(correlativoCT.ultimo_numero); // Usar el correlativo de CT
-            // const updatedNumber = invoiceNumber + 1;
-            const updatedNumber = Number(invoiceNumber); // Ensure it's treated as a number
-            const updatedNumberCT = Number(controlNumber);
-
-            // Calculate totals in VES based on currency and exchange rate
+            const invoiceNumber = Number(correlativo.ultimo_documento);
+            const controlNumber = Number(correlativo.ultimo_control);
+            
+            //Calculate totals in VES based on currency and exchange rate
             const totalGeneralVES = paymentData?.paymentCurrency === 'USD' ? (totals.grandTotal * paymentData?.exchangeRate) : totals.grandTotal;
             const montoExentoVES = paymentData?.paymentCurrency === 'USD' ? (totals.exemptAmount * paymentData?.exchangeRate) : totals.exemptAmount;
             const baseImponibleVES = paymentData?.paymentCurrency === 'USD' ? (totals.taxableAmount * paymentData?.exchangeRate) : totals.taxableAmount;
@@ -448,11 +363,12 @@ const POS: React.FC = () => {
             const montoIvaVES = paymentData?.paymentCurrency === 'USD' ? (totals.tax * paymentData?.exchangeRate) : totals.tax;
             const igtfVES = paymentData?.paymentCurrency === 'USD' ? (totals.igtf * paymentData?.exchangeRate) : totals.igtf;
 
-            const documento: Document = {
+
+            const document: Document = {
                 id_documento:0,
                 tipo_documento: 'FA',
                 numero_documento: invoiceNumber, // Convert invoice number to string
-                numero_control: controlNumber, // Convert control number to string
+                numero_control: controlNumber, // Number(correlativoCT.ultimo_control), // Convert control number to string , it´s the same
                 fecha_emision: formattedDate,
                 razon_social: customer.razonSocial,
                 registro_fiscal: customer.registroFiscal,
@@ -509,7 +425,7 @@ const POS: React.FC = () => {
             });
 
             const invoiceRequest: InvoiceRequest = {
-                documento,
+                documento: document,
                 detalles,
             };
 
@@ -522,8 +438,10 @@ const POS: React.FC = () => {
                     // Now, after the invoice is successfully created, update the correlative:
                     if (correlativo) {
                         try {
-                            await invoiceService.updateCorrelativo(correlativo.tipo_documento, { ultimo_numero: updatedNumber + 1 });
-                            toast.success(`Correlativo FA actualizado correctamente a: ${updatedNumber + 1}`);
+                            await invoiceService.updateCorrelativoDocumento(correlativo.tipo_documento, { ultimo_documento: invoiceNumber + 1, ultimo_control: controlNumber + 1 });
+                            toast.success(`Correlativo FA actualizado correctamente a: ${invoiceNumber + 1}`);
+                            setCorrelativo({ ...correlativo, ultimo_documento: Number(invoiceNumber) + 1 });//Update correlativo value after success
+                            
 
                         } catch (updateError: any) {
                             console.error('Error updating correlativo after creating the invoice', updateError);
@@ -531,16 +449,7 @@ const POS: React.FC = () => {
                         }
                     }
 
-                    // Update correlativo CT
-                    if (correlativoCT) {
-                        try {
-                            await invoiceService.updateCorrelativo(correlativoCT.tipo_documento, { ultimo_numero: updatedNumberCT + 1 });
-                            toast.success(`Correlativo CT actualizado correctamente a: ${updatedNumberCT + 1}`);
-                        } catch (updateError: any) {
-                            console.error('Error updating correlativo CT after creating the invoice', updateError);
-                            toast.error("Factura creada, pero hubo un error actualizando el número correlativo CT. Contacte al administrador");
-                        }
-                    }
+                   
 
                     if (!onCredit && paymentData && paymentData.isPaid) {
                         // Determine correct payment description based on currency
@@ -553,13 +462,13 @@ const POS: React.FC = () => {
                         let paymentReference = paymentData.reference;
                         let banco = paymentData.banco;
                         if (paymentData.metodoPago === 'efectivo') {
-                            paymentReference = `Pago efectivo ${paymentData.currency} A factura: ${controlNumber} fecha: ${formattedDate}`;
+                            paymentReference = `Pago efectivo ${paymentData.currency} A factura: ${invoiceNumber} fecha: ${formattedDate}`;
                             banco = `Efectivo ${paymentData.currency}`;
                         }
 
                         // Construct PagoRequest
                         const pagoRequest: PagoRequest = {
-                            documento_afectado: documento.numero_documento,  // Or use the actual invoice number, if available
+                            documento_afectado: document.numero_documento,  // Or use the actual invoice number, if available
                             desc_tipo_pago: paymentDescription,
                             monto: parseFloat(paymentAmount), // Convert paymentAmount to a number
                             fecha_pago: formattedDate,
@@ -588,13 +497,13 @@ const POS: React.FC = () => {
                     toast.success('Venta completada con éxito');
                     setPaymentModalOpen(false);
 
-                    // *NOW* navigate to the invoice details page, using the controlNumber we already generated
-                    navigate(`/invoices/${controlNumber}`);
+                    // *NOW* navigate to the invoice details page, using the invoiceNumber we already generated
+                    navigate(`/invoices/${document.tipo_documento}/${document.numero_control}`, );
 
                 } else {
                     // Handle invoice creation failure
                     console.error("Error in response in createInvoice function", response)
-                    toast.error('Error al procesar la venta. Por favor, contacte al administrador.');
+                    toast.error(response?.message || 'Error al procesar la venta. Por favor, contacte al administrador.');
                 }
             }
             catch (error: any) {
@@ -746,7 +655,7 @@ const POS: React.FC = () => {
                                         >
                                             <span className="sr-only">Siguiente</span>
                                             <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01--1.414 0z" clipRule="evenodd" />
                                             </svg>
                                         </button>
                                     </nav>
@@ -773,13 +682,7 @@ const POS: React.FC = () => {
                             <Info className="h-4 w-4 mr-1" />
                             RIF
                         </button>
-                        {/* <button
-                        onClick={() => handleOpenCustomerModal()}
-                        className="btn btn-secondary btn-sm flex items-center"
-                    >
-                        <UserPlus className="h-4 w-4 mr-1" />
-                        Cliente
-                    </button>  REMOVED BUTTON */}
+
                     </div>
 
                 </div>
@@ -877,16 +780,15 @@ const POS: React.FC = () => {
                             <button
                                 onClick={() => setShowCreditOption(true)}
                                 className="btn btn-secondary flex-1 flex justify-center items-center"
-                                disabled={correlativoLoading || noCorrelativoAlert || correlativoCTLoading || noCorrelativoCTAlert}
+                                disabled={correlativoLoading || noCorrelativoAlert }
                             >
                                 <CreditCard className="h-4 w-4 mr-1" />
                                 A Crédito
                             </button>
-                            
                             <button
                                 onClick={() => setPaymentModalOpen(true)}
                                 className="btn btn-primary flex-1 flex justify-center items-center"
-                                disabled={correlativoLoading || noCorrelativoAlert || correlativoCTLoading || noCorrelativoCTAlert}
+                                disabled={correlativoLoading || noCorrelativoAlert}
                             >
                                 <CreditCard className="h-4 w-4 mr-1" />
                                 Pagar
@@ -1036,45 +938,6 @@ const POS: React.FC = () => {
                     </div>
                 </div>
             )}
-
-            {/* Correlativo CT Loading Overlay */}
-            {correlativoCTLoading && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <LoadingSpinner text="Cargando correlativo CT..." />
-                </div>
-            )}
-
-            {/* No Correlativo CT Alert */}
-            {noCorrelativoCTAlert && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl animate-slide-up">
-                        <div className="flex items-start">
-                            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-error-100 sm:mx-0 sm:h-10 sm:w-10">
-                                <AlertTriangle className="h-6 w-6 text-error-600" aria-hidden="true" />
-                            </div>
-                            <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                                <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                                    Error
-                                </h3>
-                                <div className="mt-2">
-                                    <p className="text-sm text-gray-500">
-                                        No se encontró información del correlativo CT.  Por favor, contacte al administrador.
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex justify-end space-x-3 mt-6">
-                            <button
-                                type="button"
-                                className="btn btn-secondary"
-                                onClick={() => setNoCorrelativoCTAlert(false)}
-                            >
-                                Aceptar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
@@ -1117,7 +980,6 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ total, onClose, onComplete,
             currency: currency,
             exchangeRate: parseFloat(exchangeRate),
             paymentCurrency: paymentCurrency, // Add paymentCurrency
-            //  total:total
         };
 
         onComplete(paymentData);
